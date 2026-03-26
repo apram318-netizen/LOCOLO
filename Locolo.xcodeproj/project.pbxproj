@@ -1,0 +1,672 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		D456D9CB2EB1A52E00506516 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9CA2EB1A52E00506516 /* FirebaseAuth */; };
+		D456D9CD2EB1A52E00506516 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9CC2EB1A52E00506516 /* FirebaseFirestore */; };
+		D456D9CF2EB1A52E00506516 /* FirebaseInAppMessaging-Beta in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9CE2EB1A52E00506516 /* FirebaseInAppMessaging-Beta */; };
+		D456D9D12EB1A52E00506516 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9D02EB1A52E00506516 /* FirebaseMessaging */; };
+		D456D9D32EB1A52E00506516 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9D22EB1A52E00506516 /* FirebaseStorage */; };
+		D456D9D62EB1A5BA00506516 /* MessageKit in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9D52EB1A5BA00506516 /* MessageKit */; };
+		D48AE3362EC1833D00B4D13C /* LocoloCache.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = D48AE3342EC1833D00B4D13C /* LocoloCache.xcdatamodeld */; };
+		D4A66A7A2E7BAB980058194E /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A792E7BAB980058194E /* Auth */; };
+		D4A66A7C2E7BAB980058194E /* Functions in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A7B2E7BAB980058194E /* Functions */; };
+		D4A66A7E2E7BAB980058194E /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A7D2E7BAB980058194E /* PostgREST */; };
+		D4A66A802E7BAB980058194E /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A7F2E7BAB980058194E /* Realtime */; };
+		D4A66A822E7BAB980058194E /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A812E7BAB980058194E /* Storage */; };
+		D4A66A842E7BAB980058194E /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A832E7BAB980058194E /* Supabase */; };
+		D4A7B8732E8A6CB100A9125F /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = D4A7B8722E8A6CB100A9125F /* MapboxMaps */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		D443D0722EC5C218007625BE /* LocoloNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LocoloNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		D48AE3352EC1833D00B4D13C /* LocoloCache.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = LocoloCache.xcdatamodel; sourceTree = "<group>"; };
+		D4A669C92E799B570058194E /* Locolo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Locolo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D4A66AB82E8000790058194E /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
+		D4A66ABA2E8000790058194E /* XcodeKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XcodeKit.framework; path = Library/Frameworks/XcodeKit.framework; sourceTree = DEVELOPER_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D443D0772EC5C218007625BE /* Exceptions for "LocoloNotificationService" folder in "LocoloNotificationService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = D443D0712EC5C218007625BE /* LocoloNotificationService */;
+		};
+		D4F210F22E8A887B0013354E /* Exceptions for "Locolo" folder in "Locolo" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = D4A669C82E799B570058194E /* Locolo */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		D443D0732EC5C218007625BE /* LocoloNotificationService */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D443D0772EC5C218007625BE /* Exceptions for "LocoloNotificationService" folder in "LocoloNotificationService" target */,
+			);
+			path = LocoloNotificationService;
+			sourceTree = "<group>";
+		};
+		D4A669CB2E799B570058194E /* Locolo */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D4F210F22E8A887B0013354E /* Exceptions for "Locolo" folder in "Locolo" target */,
+			);
+			path = Locolo;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D443D06F2EC5C218007625BE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D4A669C62E799B570058194E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D4A66A7E2E7BAB980058194E /* PostgREST in Frameworks */,
+				D4A66A7C2E7BAB980058194E /* Functions in Frameworks */,
+				D4A66A842E7BAB980058194E /* Supabase in Frameworks */,
+				D4A66A7A2E7BAB980058194E /* Auth in Frameworks */,
+				D4A66A822E7BAB980058194E /* Storage in Frameworks */,
+				D456D9D32EB1A52E00506516 /* FirebaseStorage in Frameworks */,
+				D456D9CD2EB1A52E00506516 /* FirebaseFirestore in Frameworks */,
+				D4A7B8732E8A6CB100A9125F /* MapboxMaps in Frameworks */,
+				D4A66A802E7BAB980058194E /* Realtime in Frameworks */,
+				D456D9CB2EB1A52E00506516 /* FirebaseAuth in Frameworks */,
+				D456D9D62EB1A5BA00506516 /* MessageKit in Frameworks */,
+				D456D9D12EB1A52E00506516 /* FirebaseMessaging in Frameworks */,
+				D456D9CF2EB1A52E00506516 /* FirebaseInAppMessaging-Beta in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D4A669C02E799B570058194E = {
+			isa = PBXGroup;
+			children = (
+				D48AE3342EC1833D00B4D13C /* LocoloCache.xcdatamodeld */,
+				D4A669CB2E799B570058194E /* Locolo */,
+				D443D0732EC5C218007625BE /* LocoloNotificationService */,
+				D4A66AB72E8000790058194E /* Frameworks */,
+				D4A669CA2E799B570058194E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D4A669CA2E799B570058194E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D4A669C92E799B570058194E /* Locolo.app */,
+				D443D0722EC5C218007625BE /* LocoloNotificationService.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D4A66AB72E8000790058194E /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D4A66AB82E8000790058194E /* Cocoa.framework */,
+				D4A66ABA2E8000790058194E /* XcodeKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D443D0712EC5C218007625BE /* LocoloNotificationService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D443D0782EC5C218007625BE /* Build configuration list for PBXNativeTarget "LocoloNotificationService" */;
+			buildPhases = (
+				D443D06E2EC5C218007625BE /* Sources */,
+				D443D06F2EC5C218007625BE /* Frameworks */,
+				D443D0702EC5C218007625BE /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				D443D0732EC5C218007625BE /* LocoloNotificationService */,
+			);
+			name = LocoloNotificationService;
+			packageProductDependencies = (
+			);
+			productName = LocoloNotificationService;
+			productReference = D443D0722EC5C218007625BE /* LocoloNotificationService.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		D4A669C82E799B570058194E /* Locolo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D4A669D42E799B590058194E /* Build configuration list for PBXNativeTarget "Locolo" */;
+			buildPhases = (
+				D4A669C52E799B570058194E /* Sources */,
+				D4A669C62E799B570058194E /* Frameworks */,
+				D4A669C72E799B570058194E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				D4A669CB2E799B570058194E /* Locolo */,
+			);
+			name = Locolo;
+			packageProductDependencies = (
+				D4A66A792E7BAB980058194E /* Auth */,
+				D4A66A7B2E7BAB980058194E /* Functions */,
+				D4A66A7D2E7BAB980058194E /* PostgREST */,
+				D4A66A7F2E7BAB980058194E /* Realtime */,
+				D4A66A812E7BAB980058194E /* Storage */,
+				D4A66A832E7BAB980058194E /* Supabase */,
+				D4A7B8722E8A6CB100A9125F /* MapboxMaps */,
+				D456D9CA2EB1A52E00506516 /* FirebaseAuth */,
+				D456D9CC2EB1A52E00506516 /* FirebaseFirestore */,
+				D456D9CE2EB1A52E00506516 /* FirebaseInAppMessaging-Beta */,
+				D456D9D02EB1A52E00506516 /* FirebaseMessaging */,
+				D456D9D22EB1A52E00506516 /* FirebaseStorage */,
+				D456D9D52EB1A5BA00506516 /* MessageKit */,
+			);
+			productName = Locolo;
+			productReference = D4A669C92E799B570058194E /* Locolo.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D4A669C12E799B570058194E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1640;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					D443D0712EC5C218007625BE = {
+						CreatedOnToolsVersion = 16.4;
+					};
+					D4A669C82E799B570058194E = {
+						CreatedOnToolsVersion = 16.4;
+					};
+				};
+			};
+			buildConfigurationList = D4A669C42E799B570058194E /* Build configuration list for PBXProject "Locolo" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D4A669C02E799B570058194E;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D4A66A782E7BAB980058194E /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				D4A7B8712E8A6CB100A9125F /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */,
+				D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				D456D9D42EB1A5BA00506516 /* XCRemoteSwiftPackageReference "MessageKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = D4A669CA2E799B570058194E /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D4A669C82E799B570058194E /* Locolo */,
+				D443D0712EC5C218007625BE /* LocoloNotificationService */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D443D0702EC5C218007625BE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D4A669C72E799B570058194E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D443D06E2EC5C218007625BE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D4A669C52E799B570058194E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D48AE3362EC1833D00B4D13C /* LocoloCache.xcdatamodeld in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		D443D0792EC5C218007625BE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RB24MJ38LB;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LocoloNotificationService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = LocoloNotificationService;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = edu.monash.LocoloNotificationService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D443D07A2EC5C218007625BE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RB24MJ38LB;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LocoloNotificationService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = LocoloNotificationService;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = edu.monash.LocoloNotificationService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		D4A669D22E799B590058194E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				STRINGS_FILE_INFOPLIST_RENAME = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		D4A669D32E799B590058194E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				STRINGS_FILE_INFOPLIST_RENAME = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		D4A669D52E799B590058194E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RB24MJ38LB;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Locolo/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Locolo uses your camera to place and capture AR experiences around you.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "We use your location to keep your Loops and places updated even in background.";
+				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "We use your location to find nearby places.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to find nearby places.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Locolo uses your microphone to enable voice and sound features in AR.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				NEW_SETTING = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.apram.locolo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D4A669D62E799B590058194E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MDUMW2CFXU;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Locolo/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Locolo uses your camera to place and capture AR experiences around you.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "We use your location to keep your Loops and places updated even in background.";
+				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "We use your location to find nearby places.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to find nearby places.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Locolo uses your microphone to enable voice and sound features in AR.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				NEW_SETTING = "";
+				PRODUCT_BUNDLE_IDENTIFIER = edu.monash.Locolo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		D443D0782EC5C218007625BE /* Build configuration list for PBXNativeTarget "LocoloNotificationService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D443D0792EC5C218007625BE /* Debug */,
+				D443D07A2EC5C218007625BE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D4A669C42E799B570058194E /* Build configuration list for PBXProject "Locolo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D4A669D22E799B590058194E /* Debug */,
+				D4A669D32E799B590058194E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D4A669D42E799B590058194E /* Build configuration list for PBXNativeTarget "Locolo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D4A669D52E799B590058194E /* Debug */,
+				D4A669D62E799B590058194E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.5.0;
+			};
+		};
+		D456D9D42EB1A5BA00506516 /* XCRemoteSwiftPackageReference "MessageKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/MessageKit/MessageKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.0.0;
+			};
+		};
+		D4A66A782E7BAB980058194E /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase-community/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+		D4A7B8712E8A6CB100A9125F /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mapbox/mapbox-maps-ios.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D456D9CA2EB1A52E00506516 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		D456D9CC2EB1A52E00506516 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		D456D9CE2EB1A52E00506516 /* FirebaseInAppMessaging-Beta */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = "FirebaseInAppMessaging-Beta";
+		};
+		D456D9D02EB1A52E00506516 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+		D456D9D22EB1A52E00506516 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+		D456D9D52EB1A5BA00506516 /* MessageKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D456D9D42EB1A5BA00506516 /* XCRemoteSwiftPackageReference "MessageKit" */;
+			productName = MessageKit;
+		};
+		D4A66A792E7BAB980058194E /* Auth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4A66A782E7BAB980058194E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Auth;
+		};
+		D4A66A7B2E7BAB980058194E /* Functions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4A66A782E7BAB980058194E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Functions;
+		};
+		D4A66A7D2E7BAB980058194E /* PostgREST */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4A66A782E7BAB980058194E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = PostgREST;
+		};
+		D4A66A7F2E7BAB980058194E /* Realtime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4A66A782E7BAB980058194E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Realtime;
+		};
+		D4A66A812E7BAB980058194E /* Storage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4A66A782E7BAB980058194E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Storage;
+		};
+		D4A66A832E7BAB980058194E /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4A66A782E7BAB980058194E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+		D4A7B8722E8A6CB100A9125F /* MapboxMaps */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4A7B8712E8A6CB100A9125F /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */;
+			productName = MapboxMaps;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin XCVersionGroup section */
+		D48AE3342EC1833D00B4D13C /* LocoloCache.xcdatamodeld */ = {
+			isa = XCVersionGroup;
+			children = (
+				D48AE3352EC1833D00B4D13C /* LocoloCache.xcdatamodel */,
+			);
+			currentVersion = D48AE3352EC1833D00B4D13C /* LocoloCache.xcdatamodel */;
+			path = LocoloCache.xcdatamodeld;
+			sourceTree = "<group>";
+			versionGroupType = wrapper.xcdatamodel;
+		};
+/* End XCVersionGroup section */
+	};
+	rootObject = D4A669C12E799B570058194E /* Project object */;
+}

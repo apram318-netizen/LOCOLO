@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23788.4" systemVersion="24G90" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithSwiftData="YES" userDefinedModelVersionIdentifier="">
+    <entity name="CachedActivity" representedClassName="CachedActivity" syncable="YES" codeGenerationType="class">
+        <attribute name="activityDateTime" optional="YES" attributeType="Date"/>
+        <attribute name="activityDescription" optional="YES" attributeType="String"/>
+        <attribute name="activityId" attributeType="UUID"/>
+        <attribute name="activityImageURL" optional="YES" attributeType="String"/>
+        <attribute name="categoryId" optional="YES" attributeType="UUID"/>
+        <attribute name="createdAt" attributeType="Date"/>
+        <attribute name="isUserHidden" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="loopId" attributeType="UUID"/>
+        <attribute name="name" attributeType="String"/>
+        <attribute name="placeId" optional="YES" attributeType="UUID"/>
+        <attribute name="postedBy" attributeType="UUID"/>
+        <attribute name="syncedAt" optional="YES" attributeType="Date"/>
+    </entity>
+    <entity name="CachedDigitalAsset" representedClassName="CachedDigitalAsset" syncable="YES" codeGenerationType="class">
+        <attribute name="acceptsOffers" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="activeOffers" optional="YES" attributeType="Integer 32" usesScalarValueType="YES"/>
+        <attribute name="assetId" attributeType="UUID"/>
+        <attribute name="boughtPrice" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="category" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" attributeType="Date"/>
+        <attribute name="currentValue" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="descriptionText" optional="YES" attributeType="String"/>
+        <attribute name="fileType" attributeType="String"/>
+        <attribute name="fileURL" attributeType="String"/>
+        <attribute name="highestOffer" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="hypeCount" optional="YES" attributeType="Integer 32" usesScalarValueType="YES"/>
+        <attribute name="interactionType" optional="YES" attributeType="String"/>
+        <attribute name="isForSale" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="latitude" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="localFilePath" optional="YES" attributeType="String"/>
+        <attribute name="localPanoramaPath" optional="YES" attributeType="String"/>
+        <attribute name="localThumbPath" optional="YES" attributeType="String"/>
+        <attribute name="locationName" optional="YES" attributeType="String"/>
+        <attribute name="longitude" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="panoramaURL" optional="YES" attributeType="String"/>
+        <attribute name="rotationX" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="rotationY" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="rotationZ" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="scaleX" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="scaleY" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="scaleZ" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="syncedAt" optional="YES" attributeType="Date"/>
+        <attribute name="thumbURL" optional="YES" attributeType="String"/>
+        <attribute name="userId" attributeType="UUID"/>
+        <attribute name="viewCount" optional="YES" attributeType="Integer 32" usesScalarValueType="YES"/>
+        <attribute name="visibility" attributeType="String"/>
+        <relationship name="owner" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CachedUser" inverseName="digitalAssets" inverseEntity="CachedUser"/>
+    </entity>
+    <entity name="CachedLocation" representedClassName="CachedLocation" syncable="YES" codeGenerationType="class">
+        <attribute name="address" attributeType="String"/>
+        <attribute name="city" optional="YES" attributeType="String"/>
+        <attribute name="country" optional="YES" attributeType="String"/>
+        <attribute name="distMeters" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="geomWKT" optional="YES" attributeType="String"/>
+        <attribute name="googlePlaceId" optional="YES" attributeType="String"/>
+        <attribute name="latitude" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="locationId" attributeType="UUID"/>
+        <attribute name="longitude" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="name" attributeType="String"/>
+        <attribute name="similarityScore" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="syncedAt" optional="YES" attributeType="Date"/>
+        <relationship name="places" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="CachedPlace" inverseName="location" inverseEntity="CachedPlace"/>
+    </entity>
+    <entity name="CachedPlace" representedClassName="CachedPlace" syncable="YES" codeGenerationType="class">
+        <attribute name="categoryId" optional="YES" attributeType="UUID"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date"/>
+        <attribute name="localImagePath" optional="YES" attributeType="String"/>
+        <attribute name="locationId" optional="YES" attributeType="UUID"/>
+        <attribute name="loopId" optional="YES" attributeType="UUID"/>
+        <attribute name="name" attributeType="String"/>
+        <attribute name="placeDescription" optional="YES" attributeType="String"/>
+        <attribute name="placeId" attributeType="UUID"/>
+        <attribute name="postedBy" optional="YES" attributeType="UUID"/>
+        <attribute name="remoteImageURL" optional="YES" attributeType="String"/>
+        <attribute name="score" optional="YES" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="syncedAt" optional="YES" attributeType="Date"/>
+        <attribute name="trailerMediaURL" optional="YES" attributeType="String"/>
+        <attribute name="verificationStatus" optional="YES" attributeType="String"/>
+        <relationship name="location" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CachedLocation" inverseName="places" inverseEntity="CachedLocation"/>
+        <relationship name="posts" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CachedPost" inverseName="place" inverseEntity="CachedPost"/>
+        <relationship name="user" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CachedUser" inverseName="places" inverseEntity="CachedUser"/>
+    </entity>
+    <entity name="CachedPost" representedClassName="CachedPost" syncable="YES" codeGenerationType="class">
+        <attribute name="authorId" attributeType="UUID"/>
+        <attribute name="caption" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" attributeType="Date"/>
+        <attribute name="localMediaPath" optional="YES" attributeType="String"/>
+        <attribute name="localPlaceMediaPath" optional="YES" attributeType="String"/>
+        <attribute name="localRealMemoryPath" optional="YES" attributeType="String"/>
+        <attribute name="loopId" attributeType="UUID"/>
+        <attribute name="placeId" optional="YES" attributeType="UUID"/>
+        <attribute name="postId" attributeType="UUID"/>
+        <attribute name="remoteMediaURL" optional="YES" attributeType="String"/>
+        <attribute name="remotePlaceMediaURL" optional="YES" attributeType="String"/>
+        <attribute name="remoteRealMemoryURL" optional="YES" attributeType="String"/>
+        <attribute name="syncedAt" optional="YES" attributeType="Date"/>
+        <attribute name="tagsJSON" optional="YES" attributeType="String"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date"/>
+        <attribute name="visibility" optional="YES" attributeType="String"/>
+        <relationship name="author" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CachedUser" inverseName="posts" inverseEntity="CachedUser"/>
+        <relationship name="place" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CachedPlace" inverseName="posts" inverseEntity="CachedPlace"/>
+    </entity>
+    <entity name="CachedUser" representedClassName="CachedUser" syncable="YES" codeGenerationType="class">
+        <attribute name="avatarURL" optional="YES" attributeType="String"/>
+        <attribute name="bio" optional="YES" attributeType="String"/>
+        <attribute name="coverURL" optional="YES" attributeType="String"/>
+        <attribute name="email" optional="YES" attributeType="String"/>
+        <attribute name="joinedAt" optional="YES" attributeType="Date"/>
+        <attribute name="localAvatarPath" optional="YES" attributeType="String"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="syncedAt" optional="YES" attributeType="Date"/>
+        <attribute name="userId" attributeType="UUID"/>
+        <attribute name="username" attributeType="String"/>
+        <attribute name="verificationStatus" optional="YES" attributeType="String"/>
+        <relationship name="digitalAssets" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CachedDigitalAsset" inverseName="owner" inverseEntity="CachedDigitalAsset"/>
+        <relationship name="places" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="CachedPlace" inverseName="user" inverseEntity="CachedPlace"/>
+        <relationship name="posts" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CachedPost" inverseName="author" inverseEntity="CachedPost"/>
+    </entity>
+</model>
