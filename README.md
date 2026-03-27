@@ -1,93 +1,145 @@
 # Locolo
 
+Locolo is a location-based social iOS app that organises communities around real geographic zones called **Loops** — neighbourhoods, campuses, and districts. Everything in the app is anchored to where you physically are: posts, events, places, AR digital assets, and real-time chat all tied to your local community.
 
+---
 
-## Getting started
+## Features
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### Loops
+Geographic community zones automatically detected via GPS. The app uses PostGIS spatial queries to determine which Loop a user is in and tracks time spent in each one. Loops are bounded by real administrative boundaries fetched from the Overpass API (OpenStreetMap).
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+### Social Feed
+Multiple post types tailored to context:
+- **Standard posts** — text and media
+- **Location posts** — tied to a specific place with a place card overlay
+- **Event posts** — full event creation with pricing, dates, and attendee management
+- **Real Memory** — BeReal-style authentic photo moments
+- **Portal / Hover / Cloud posts** — location-specific shared experiences
 
-## Add your files
+### Engagement
+- **Hype** — upvote system
+- **Echo** — threaded comments and replies
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+### Discover
+Browse and filter local places, events, and community activity. Places include images, categories, ratings, and a verification workflow.
+
+### AR & Digital Assets
+- View and place 3D digital assets in the real world using ARKit and RealityKit
+- Full AR marketplace: create offers, negotiate pricing, manage a wishlist
+- Panorama viewer for 360° context around asset locations
+
+### Real-time Messaging
+Firebase Firestore-powered chat with live message streaming, conversation management, user search, and per-user message deletion.
+
+### Profile
+User profiles with avatar, cover image, bio, stats (posts, followers, following), verification badges, and tabs for posts, visited places, and digital art collection.
+
+### Location Tracking
+Continuous background GPS tracking with smart visit confirmation (multi-tier: waiting → confirmed → reset). Location pings every 5 seconds when moving, 60 seconds when idle.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| UI | SwiftUI, Combine |
+| AR | ARKit, RealityKit, SceneKit |
+| Maps | MapKit, Mapbox Maps iOS |
+| Primary database | Supabase (PostgreSQL + PostGIS) |
+| Real-time chat | Firebase Firestore |
+| Authentication | Supabase Auth + Firebase Anonymous Auth |
+| Location | CoreLocation, Overpass API, Google Places API |
+| Caching | CoreData |
+| Storage | Supabase Object Storage |
+
+---
+
+## Project Structure
 
 ```
-cd existing_repo
-git remote add origin https://git.infotech.monash.edu/fit3178-apra0043/locolo.git
-git branch -M main
-git push -uf origin main
+Locolo/
+├── Models/
+│   ├── Controllers/        # Supabase, Google Places, Location, AR managers
+│   ├── Repositories/       # Data access layer (Supabase + Firestore)
+│   └── Cache/              # CoreData cache store and mapper
+├── ViewModels/             # ObservableObject view models per feature
+├── Views/
+│   ├── LoginScreens/       # Auth flow (sign up, sign in, OTP, password reset)
+│   ├── ExploreScreen/      # Feed, Loops, posts
+│   ├── Discover Screen/    # Places, events, activities
+│   ├── ARScreen/           # AR gallery, marketplace, offers
+│   ├── CreateView/         # Post and AR asset creation flows
+│   ├── Messages/           # Chat and conversation list
+│   ├── ProfileScreen/      # User profile and tabs
+│   └── SettingsScreen/     # Settings, edit profile, logout
+└── LocoloNotificationService/  # Push notification extension
 ```
 
-## Integrate with your tools
+---
 
-- [ ] [Set up project integrations](https://git.infotech.monash.edu/fit3178-apra0043/locolo/-/settings/integrations)
+## Getting Started
 
-## Collaborate with your team
+### Requirements
+- Xcode 15+
+- iOS 17+
+- Swift 5.9+
+- Active Supabase project with PostGIS enabled
+- Firebase project with Firestore and Authentication enabled
+- Google Cloud project with Places API and Maps SDK enabled
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+### Setup
 
-## Test and Deploy
+1. **Clone the repo**
+   ```bash
+   git clone https://github.com/apram318-netizen/LOCOLO.git
+   cd LOCOLO
+   ```
 
-Use the built-in continuous integration in GitLab.
+2. **Install dependencies**
+   Open `Locolo.xcodeproj` in Xcode — Swift Package Manager will resolve dependencies automatically.
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+3. **Add secrets**
+   Copy `Locolo/Secrets.example.swift` to `Locolo/Secrets.swift` and fill in your credentials:
+   ```swift
+   enum Secrets {
+       static let supabaseURL      = "https://your-project.supabase.co"
+       static let supabaseAnonKey  = "your-supabase-anon-key"
+       static let googleMapsAPIKey = "your-google-maps-api-key"
+   }
+   ```
+   Then add `Secrets.swift` to the Xcode target (drag it into the project navigator).
 
-***
+4. **Add Firebase config**
+   Download `GoogleService-Info.plist` from your Firebase console and place it in the `Locolo/` folder. Add it to the Xcode target.
 
-# Editing this README
+5. **Build and run**
+   Select a simulator or device and hit Run.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+---
 
-## Suggestions for a good README
+## Environment Variables / Secrets
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+The following files are gitignored and must be provided locally:
 
-## Name
-Choose a self-explaining name for your project.
+| File | Purpose |
+|---|---|
+| `Locolo/Secrets.swift` | Supabase URL, anon key, Google Maps API key |
+| `Locolo/GoogleService-Info.plist` | Firebase project configuration |
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+---
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## Dependencies
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Managed via Swift Package Manager:
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+- [Supabase Swift](https://github.com/supabase/supabase-swift) `2.32.0`
+- [Firebase iOS SDK](https://github.com/firebase/firebase-ios-sdk) `12.5.0`
+- [Mapbox Maps iOS](https://github.com/mapbox/mapbox-maps-ios) `11.15.1`
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+---
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Private — all rights reserved.
