@@ -27,8 +27,7 @@ struct BottomTabBar: View {
                     .foregroundColor(colorScheme == .dark ? .white : .black)
                     .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
             }
-            tabButton(index: 3, systemName: "arkit")
-            tabButton(index: 4, systemName: "person.crop.circle")
+            tabButton(index: 3, systemName: "person.crop.circle")
         }
         .padding(.horizontal, horizontalSpacing / 2)
         .padding(.vertical, verticalPadding)

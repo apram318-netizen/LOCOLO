@@ -134,6 +134,154 @@ class EventsDiscoverRepository {
         
         return response.first
     }
-    
+
+    // MARK: - ATTENDANCE FLOW
+
+    // Internal decode model for the attendee + user join
+    private struct AttendeeRow: Codable {
+        let userId: UUID
+        let status: String
+        let user: AttendeeUserRow
+
+        struct AttendeeUserRow: Codable {
+            let userId: UUID
+            let username: String
+            let avatarUrl: String?
+
+            enum CodingKeys: String, CodingKey {
+                case userId    = "user_id"
+                case username
+                case avatarUrl = "avatar_url"
+            }
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case userId = "user_id"
+            case status
+            case user
+        }
+    }
+
+    // Upsert payload — Codable so Supabase can encode it cleanly
+    private struct AttendeeUpsertPayload: Codable {
+        let eventId: UUID
+        let userId: UUID
+        let status: String
+
+        enum CodingKeys: String, CodingKey {
+            case eventId = "event_id"
+            case userId  = "user_id"
+            case status
+        }
+    }
+
+    // MARK: FUNCTION: fetchAttendees
+    /// Returns a preview list (top N) for avatar stacks on event cards and detail views.
+    func fetchAttendees(eventId: UUID, limit: Int = 5) async throws -> [AttendeePreview] {
+        let rows: [AttendeeRow] = try await client
+            .from("event_attendees")
+            .select("user_id, status, user:users(user_id, username, avatar_url)")
+            .eq("event_id", value: eventId.uuidString)
+            .limit(limit)
+            .execute()
+            .value
+
+        return rows.map { row in
+            AttendeePreview(
+                id: row.user.userId,
+                username: row.user.username,
+                avatarUrl: row.user.avatarUrl,
+                status: AttendanceStatus(rawValue: row.status) ?? .going
+            )
+        }
+    }
+
+    // MARK: FUNCTION: fetchAllAttendees
+    /// Paginated fetch for the full attendees list sheet, filtered by status.
+    func fetchAllAttendees(eventId: UUID, status: AttendanceStatus, from: Int, limit: Int = 20) async throws -> [AttendeePreview] {
+        let rows: [AttendeeRow] = try await client
+            .from("event_attendees")
+            .select("user_id, status, user:users(user_id, username, avatar_url)")
+            .eq("event_id", value: eventId.uuidString)
+            .eq("status", value: status.rawValue)
+            .range(from: from, to: from + limit - 1)
+            .execute()
+            .value
+
+        return rows.map { row in
+            AttendeePreview(
+                id: row.user.userId,
+                username: row.user.username,
+                avatarUrl: row.user.avatarUrl,
+                status: AttendanceStatus(rawValue: row.status) ?? .going
+            )
+        }
+    }
+
+    // MARK: FUNCTION: fetchMyStatus
+    /// Returns the current user's attendance status for an event, or nil if not attending.
+    func fetchMyStatus(eventId: UUID, userId: UUID) async throws -> AttendanceStatus? {
+        struct StatusRow: Codable { let status: String }
+        let rows: [StatusRow] = try await client
+            .from("event_attendees")
+            .select("status")
+            .eq("event_id", value: eventId.uuidString)
+            .eq("user_id", value: userId.uuidString)
+            .limit(1)
+            .execute()
+            .value
+
+        guard let raw = rows.first?.status else { return nil }
+        return AttendanceStatus(rawValue: raw)
+    }
+
+    // MARK: FUNCTION: fetchAttendeeCounts
+    /// Returns going + interested counts. Fetches all status rows and counts client-side.
+    func fetchAttendeeCounts(eventId: UUID) async throws -> (going: Int, interested: Int) {
+        struct Row: Codable { let status: String }
+        let rows: [Row] = try await client
+            .from("event_attendees")
+            .select("status")
+            .eq("event_id", value: eventId.uuidString)
+            .execute()
+            .value
+
+        let going      = rows.filter { $0.status == AttendanceStatus.going.rawValue }.count
+        let interested = rows.filter { $0.status == AttendanceStatus.interested.rawValue }.count
+        return (going, interested)
+    }
+
+    // MARK: FUNCTION: toggleAttendance
+    /// Upserts if new/different status, deletes if tapping same status again (toggle off).
+    /// Returns the new status, or nil if attendance was removed.
+    func toggleAttendance(
+        eventId: UUID,
+        userId: UUID,
+        newStatus: AttendanceStatus,
+        currentStatus: AttendanceStatus?
+    ) async throws -> AttendanceStatus? {
+        if currentStatus == newStatus {
+            // Same button tapped again → remove
+            try await client
+                .from("event_attendees")
+                .delete()
+                .eq("event_id", value: eventId.uuidString)
+                .eq("user_id", value: userId.uuidString)
+                .execute()
+            return nil
+        } else {
+            // New or changed status → upsert
+            let payload = AttendeeUpsertPayload(
+                eventId: eventId,
+                userId: userId,
+                status: newStatus.rawValue
+            )
+            try await client
+                .from("event_attendees")
+                .upsert(payload)
+                .execute()
+            return newStatus
+        }
+    }
 }
 

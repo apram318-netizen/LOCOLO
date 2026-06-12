@@ -23,6 +23,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
     @Published var userLocation: CLLocation?
     @Published var isLocalized = false
     @Published var nearbyAssets: [DigitalAsset] = []
+    @Published var listeningHint: String?
 
     // Tracks placed asset ids
     private var placedIds = Set<UUID>()
@@ -33,11 +34,18 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
     var arView: ARView?
     let locationManager = CLLocationManager()
 
+    // Runs the per-asset triggers (tap / proximity / speech / shake)
+    let triggerEngine = TriggerEngine()
+    private var frameCount = 0
+
 
     // MARK: Init
     override init() {
         super.init()
         locationManager.delegate = self
+        triggerEngine.onListeningHintChanged = { [weak self] hint in
+            self?.listeningHint = hint
+        }
     }
 
 
@@ -182,12 +190,29 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
 
     // MARK: Reset AR state
     /// - Description: Clears local tracking and resets placement state.
+    /// Also tears down trigger detectors (mic, motion sensors).
     func resetARState() {
         userLocation = nil
         isLocalized = false
         nearbyAssets = []
         placedIds.removeAll()
+        triggerEngine.teardown()
         statusMessage = "Finding location"
+    }
+
+
+    // MARK: Frame updates (proximity triggers)
+    /// - Description: Checks proximity triggers against the camera position,
+    /// throttled to every 10th frame.
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        frameCount += 1
+        guard frameCount % 10 == 0, triggerEngine.hasProximityAssets else { return }
+
+        let transform = frame.camera.transform
+        let cameraPosition = SIMD3<Float>(transform.columns.3.x,
+                                          transform.columns.3.y,
+                                          transform.columns.3.z)
+        triggerEngine.updateProximity(cameraPosition: cameraPosition)
     }
 
     
@@ -248,7 +273,16 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
             let url = URL(string: asset.fileUrl)
         else { return }
 
-        let altitude = userLocation?.altitude ?? 0
+        // Anchor at the altitude the asset was *posted* at, falling back to the
+        // viewer's altitude for legacy assets. A stored value more than 30 m
+        // from the viewer is treated as a bad GPS fix and ignored.
+        let viewerAltitude = userLocation?.altitude ?? 0
+        let altitude: Double
+        if let stored = asset.altitudeM, abs(stored - viewerAltitude) <= 30 {
+            altitude = stored
+        } else {
+            altitude = viewerAltitude
+        }
         let coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
 
         #if targetEnvironment(simulator)
@@ -302,6 +336,22 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
                         anchorEntity.addChild(entity)
                         arView.scene.addAnchor(anchorEntity)
                         #endif
+
+                        // Collision shapes are required for tap hit-testing;
+                        // the engine then runs this asset's chosen trigger.
+                        entity.generateCollisionShapes(recursive: true)
+                        self.triggerEngine.register(asset: asset, rootEntity: entity)
+
+                        // Mark someone else's asset as explored for the AR profile
+                        if let idString = SupabaseManager.shared.currentUserId,
+                           let viewerId = UUID(uuidString: idString),
+                           viewerId != asset.userId {
+                            Task {
+                                await SeenAssetsRepository.shared.recordSeen(
+                                    userId: viewerId, assetId: asset.id
+                                )
+                            }
+                        }
 
                         self.statusMessage = "Placed \(asset.name ?? "asset")"
                     })

@@ -341,6 +341,12 @@ extension AssetDetailSheet {
     }
     
     private func reverseGeocodeAssetLocation() {
+        // Assets posted with an exact address don't need geocoding
+        if let address = asset.address, !address.isEmpty {
+            resolvedLocationName = address
+            return
+        }
+
         guard let lat = asset.latitude,
               let lon = asset.longitude else { return }
 

@@ -17,10 +17,12 @@ struct EventPostView: View {
     
     @StateObject private var hypeVM: HypeViewModel
     @StateObject private var echoVM: EchoViewModel
+    @StateObject private var attendanceVM: EventAttendanceViewModel
     @State private var style: PosterStyle = .hero
     @State private var showCalendarSheet = false
     @State private var showEchoSheet = false
-    
+    @State private var showAttendeesSheet = false
+
     init(post: Post, event: Event, selectedPost: Binding<Post?>, currentUserId: UUID) {
         self.post = post
         self.event = event
@@ -28,6 +30,10 @@ struct EventPostView: View {
         self.currentUserId = currentUserId
         _hypeVM = StateObject(wrappedValue: HypeViewModel(post: post, currentUserId: currentUserId))
         _echoVM = StateObject(wrappedValue: EchoViewModel(post: post))
+        _attendanceVM = StateObject(wrappedValue: EventAttendanceViewModel(
+            eventId: event.id,
+            currentUserId: currentUserId
+        ))
     }
     
     var body: some View {
@@ -57,6 +63,18 @@ struct EventPostView: View {
             .frame(maxWidth: .infinity)
             .clipped()
             
+            // Attendance row (Going / Interested + avatar stack)
+            AttendanceCTAView(
+                vm: attendanceVM,
+                style: .card,
+                onSeeAll: { showAttendeesSheet = true }
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+            .background(Color(.systemBackground))
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             // Bottom interaction bar (like Instagram)
             interactionBar
                 .padding(.horizontal, 12)
@@ -69,6 +87,7 @@ struct EventPostView: View {
         .background(Color(.systemBackground))
         .onAppear {
             hypeVM.loadHypes()
+            attendanceVM.load()
         }
         .sheet(isPresented: $showCalendarSheet) {
             AddToCalendarView(event: event, post: post)
@@ -80,6 +99,11 @@ struct EventPostView: View {
                 .onAppear {
                     echoVM.loadEchoes(for: post)
                 }
+        }
+        .sheet(isPresented: $showAttendeesSheet) {
+            AttendeesListView(eventId: event.id, eventName: event.name)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
     

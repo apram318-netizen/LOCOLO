@@ -18,7 +18,7 @@ import simd
 /// Ties together Supabase uploads, local storage, ARKit data, and GPS tracking.
 @MainActor
 final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDelegate {
-    enum Step { case file, ar, details }
+    enum Step { case file, animations, ar, details }
 
     // MARK: Published properties
     @Published var navDestination: String? = nil
@@ -45,6 +45,24 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     @Published var descriptionText: String = ""
     @Published var visibility: String = "public"
     @Published var alsoMakePost: Bool = false
+
+    // MARK: Exact address + altitude (captured at placement time)
+    @Published var address: String = ""
+    @Published var city: String?
+    @Published var country: String?
+    @Published var capturedAltitude: Double?
+    @Published var altitudeAccuracy: Double?
+
+    // MARK: Animations (embedded in the picked USDZ)
+    @Published var availableAnimations: [String] = []
+    @Published var selectedAnimationIndex: Int?
+    var previewEntity: Entity?
+
+    // MARK: Trigger (how the animation fires in the viewer's AR session)
+    @Published var triggerType: TriggerType = .tap
+    @Published var triggerDistance: Double = 10
+    @Published var triggerPhrase: String = ""
+    @Published var shakePattern: ShakePattern = .single
 
     private let client = SupabaseManager.shared.client
     private let storage = ObjStorageManager.shared
@@ -99,6 +117,34 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     
     
 
+    // MARK: FUNCTION: loadAnimations
+    /// - Description: Loads the picked USDZ locally and enumerates the
+    /// animations embedded in it, so the poster can pick which one plays.
+    /// Runs on the local file — no need to wait for the cloud upload.
+    func loadAnimations() async {
+        guard let url = localFileURL else { return }
+
+        do {
+            let data = try secureFileData(from: url)
+            let temp = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString + ".usdz")
+            try data.write(to: temp)
+
+            let entity = try await Entity(contentsOf: temp)
+            previewEntity = entity
+            availableAnimations = entity.availableAnimations.enumerated().map { index, animation in
+                let name = animation.name ?? ""
+                return name.isEmpty ? "Animation \(index + 1)" : name
+            }
+        } catch {
+            print(" Failed to enumerate animations:", error.localizedDescription)
+            previewEntity = nil
+            availableAnimations = []
+        }
+        selectedAnimationIndex = nil
+    }
+
+
     // MARK: FUNCTION: downloadToLocal
     /// - Description: Downloads a remote model file to local storage for preview or editing.
     /// - Parameter remoteURL: URL of the model on Supabase
@@ -145,13 +191,30 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     
 
     // MARK: FUNCTION: setPlacement
-    /// - Description: Saves the AR transform and GPS location after placement.
-    /// Moves the flow to the Details”step to fill out asset info.
-    /// need to integrate altitude kater for more accurate pllacement
+    /// - Description: Saves the AR transform, GPS location, altitude, and exact
+    /// address after placement. Moves the flow to the Details step.
     /// - Parameter transform: The 3D transform captured in AR space
     func setPlacement(transform: Transform) {
         self.transform = transform
         location = location ?? locationManager.location
+
+        // Altitude of the *poster* — stored so viewers anchor the asset at the
+        // height it was placed, not at their own altitude.
+        capturedAltitude = location?.altitude
+        altitudeAccuracy = location?.verticalAccuracy
+
+        // Resolve the exact street address in the background
+        if let loc = location {
+            Task { [weak self] in
+                guard let self else { return }
+                if let resolved = try? await AddressService.shared.reverseGeocode(loc) {
+                    self.address = resolved.formatted
+                    self.city = resolved.city
+                    self.country = resolved.country
+                }
+            }
+        }
+
         step = .details
         showDetails = true
     }
@@ -187,6 +250,13 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             return
         }
 
+        let hasAnimation = selectedAnimationIndex != nil
+        if hasAnimation && triggerType == .speech
+            && triggerPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            error = "Enter the phrase that should trigger the animation."
+            return
+        }
+
         print(" Location: lat=\(lat), lon=\(lon)")
         print("   Rotation:", rotation, "Scale:", scale)
         print("   User ID:", userId)
@@ -198,14 +268,20 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
         }
 
         do {
-            // 1. Create location row
+            // 1. Create location row with exact address + altitude
             print(" Inserting location into 'locations' table...")
+            let newLocation = NewLocation(
+                name: name.isEmpty ? "AR Placement" : name,
+                geom: "SRID=4326;POINT(\(lon) \(lat))",
+                address: address.isEmpty ? nil : address,
+                city: city,
+                country: country,
+                altitude_m: capturedAltitude,
+                altitude_accuracy_m: altitudeAccuracy
+            )
             let locRow: LocationInsertResponse = try await client
                 .from("locations")
-                .insert([
-                    "name": name.isEmpty ? "AR Placement" : name,
-                    "geom": "SRID=4326;POINT(\(lon) \(lat))"
-                ])
+                .insert(newLocation)
                 .select("location_id")
                 .single()
                 .execute()
@@ -229,7 +305,11 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
                 rotation_z: Double(rotation.z),
                 scale_x: Double(scale.x),
                 scale_y: Double(scale.y),
-                scale_z: Double(scale.z)
+                scale_z: Double(scale.z),
+                animation_name: selectedAnimationIndex.flatMap { availableAnimations.indices.contains($0) ? availableAnimations[$0] : nil },
+                animation_index: selectedAnimationIndex,
+                trigger_type: hasAnimation ? triggerType.rawValue : nil,
+                trigger_config: hasAnimation ? currentTriggerConfig() : nil
             )
 
             print(" Uploading asset to 'digital_assets' table...")
@@ -256,6 +336,18 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             descriptionText = ""
             visibility = "public"
             alsoMakePost = false
+            address = ""
+            city = nil
+            country = nil
+            capturedAltitude = nil
+            altitudeAccuracy = nil
+            availableAnimations = []
+            selectedAnimationIndex = nil
+            previewEntity = nil
+            triggerType = .tap
+            triggerDistance = 10
+            triggerPhrase = ""
+            shakePattern = .single
 
         } catch {
             print("  Failed during digital asset upload.")
@@ -270,6 +362,22 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     }
     
     
+
+    // MARK: FUNCTION: currentTriggerConfig
+    /// - Description: Builds the trigger_config payload for the chosen trigger type.
+    private func currentTriggerConfig() -> TriggerConfig {
+        switch triggerType {
+        case .tap:
+            return TriggerConfig()
+        case .proximity:
+            return TriggerConfig(distanceM: triggerDistance)
+        case .speech:
+            return TriggerConfig(phrase: triggerPhrase.trimmingCharacters(in: .whitespacesAndNewlines))
+        case .shake:
+            return TriggerConfig(shakePattern: shakePattern)
+        }
+    }
+
 
     // MARK: CLLocationManagerDelegate
     /// Updates user’s last known location whenever it changes.
@@ -305,6 +413,20 @@ extension simd_quatf {
 
 
 
+// MARK: STRUCT: NewLocation
+/// - Description: Insert payload for the locations table, carrying the exact
+/// street address and the poster's altitude alongside the PostGIS point.
+struct NewLocation: Encodable {
+    let name: String
+    let geom: String
+    let address: String?
+    let city: String?
+    let country: String?
+    let altitude_m: Double?
+    let altitude_accuracy_m: Double?
+}
+
+
 // MARK: STRUCT: NewAsset
 /// - Description: a comparatively smaller struct for inserting a new digital asset into Supabase.
 struct NewAsset: Encodable {
@@ -318,4 +440,8 @@ struct NewAsset: Encodable {
     let location_id: UUID
     let rotation_x, rotation_y, rotation_z: Double
     let scale_x, scale_y, scale_z: Double
+    let animation_name: String?
+    let animation_index: Int?
+    let trigger_type: String?
+    let trigger_config: TriggerConfig?
 }

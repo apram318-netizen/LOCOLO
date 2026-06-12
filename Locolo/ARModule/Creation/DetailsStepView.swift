@@ -11,8 +11,8 @@ import SwiftUI
 struct DetailsStepView: View {
     @ObservedObject var vm: ARCreateViewModel
     let saveAction: () -> Void
-    @Environment(\.dismiss) private var dismiss
-    @Binding var selectedTab: Int
+    let onDone: () -> Void
+    @State private var showAddressSheet = false
 
     var body: some View {
         Form {
@@ -20,6 +20,30 @@ struct DetailsStepView: View {
                 TextField("Name", text: $vm.name)
                 TextField("Description", text: $vm.descriptionText, axis: .vertical)
                     .lineLimit(3...6)
+            }
+
+            Section("Location") {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(vm.address.isEmpty ? "Resolving exact address..." : vm.address)
+                            .font(.subheadline)
+                            .foregroundStyle(vm.address.isEmpty ? .secondary : .primary)
+                        if vm.capturedAltitude != nil {
+                            Text("Altitude captured for precise AR placement")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button("Edit") { showAddressSheet = true }
+                        .font(.subheadline)
+                }
+            }
+
+            if vm.selectedAnimationIndex != nil {
+                Section("Interaction") {
+                    TriggerConfigView(vm: vm)
+                }
             }
 
             Section("Privacy") {
@@ -45,10 +69,12 @@ struct DetailsStepView: View {
                 .disabled(vm.isBusy || vm.uploadedFileURL == nil || vm.transform == nil)
             }
         }
+        .sheet(isPresented: $showAddressSheet) {
+            AddressConfirmationView(vm: vm)
+        }
         .alert("Asset Uploaded!", isPresented: $vm.showSuccessAlert) {
-            Button("Move to AR Screen") {
-                selectedTab = 3
-                dismiss()
+            Button("Back to Gallery") {
+                onDone()
             }
         } message: {
             Text("Your digital asset has been successfully uploaded and is now available in AR.")

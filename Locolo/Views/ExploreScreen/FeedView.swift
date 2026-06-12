@@ -18,6 +18,7 @@ struct FeedView: View {
     // MARK: Navigation State
     // Shared navigation path for Feed to Conversations to Chat navigation flow
     @State private var path: [String] = []
+    @State private var showARDashboard = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -29,7 +30,23 @@ struct FeedView: View {
                         .font(.headline)
                     Spacer()
                     HStack(spacing: 16) {
-                        
+
+                        // Entry point to the isolated AR module
+                        Button {
+                            showARDashboard = true
+                        } label: {
+                            Image(systemName: "arkit")
+                                .font(.subheadline.bold())
+                                .foregroundColor(.white)
+                                .padding(8)
+                                .background(
+                                    LinearGradient(colors: [.purple, .pink],
+                                                   startPoint: .topLeading,
+                                                   endPoint: .bottomTrailing)
+                                )
+                                .clipShape(Circle())
+                        }
+
                         Button {
                             //  Navigate to conversation list
                             path.append("notifications")
@@ -108,6 +125,9 @@ struct FeedView: View {
                         Text("User not logged in")
                     }
                 }
+            }
+            .fullScreenCover(isPresented: $showARDashboard) {
+                ARDashboardRootView()
             }
         }
     }

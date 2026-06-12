@@ -41,7 +41,10 @@ struct FileStepView: View {
                     if vm.uploadedFileURL != nil {
                         // FBX note: can be uploaded, but AR preview requires USDZ
                         if vm.fileType == "usdz" {
-                            vm.step = .ar
+                            // Enumerate embedded animations; skip the picker
+                            // step when the model is static
+                            await vm.loadAnimations()
+                            vm.step = vm.availableAnimations.isEmpty ? .ar : .animations
                         } else {
                             vm.error = "FBX uploaded. To preview in AR, please use a USDZ file."
                             

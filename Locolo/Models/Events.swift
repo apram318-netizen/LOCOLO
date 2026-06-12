@@ -130,7 +130,38 @@ extension Event: Hashable {
 }
 
 
-// Now I need to monitor the attendees of the event, For that I need to either add a list of it in the firestore with the event Id, or I can do it realationally in the supabase by adding a table for attendees 
+// MARK: - Attendance Models
+
+/// Whether a user is going or just interested — maps to the `status` column in event_attendees
+enum AttendanceStatus: String, Codable, Equatable {
+    case going      = "going"
+    case interested = "interested"
+}
+
+/// Full DB row for event_attendees table
+struct EventAttendee: Codable, Identifiable {
+    let id: UUID
+    let eventId: UUID
+    let userId: UUID
+    let status: AttendanceStatus
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case eventId    = "event_id"
+        case userId     = "user_id"
+        case status
+        case createdAt  = "created_at"
+    }
+}
+
+/// Lightweight model for avatar stacks and the attendees list sheet
+struct AttendeePreview: Identifiable {
+    let id: UUID
+    let username: String
+    let avatarUrl: String?
+    let status: AttendanceStatus
+}
 
 // ... existing Event struct and extensions ...
 

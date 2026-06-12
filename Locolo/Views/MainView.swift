@@ -17,7 +17,6 @@ struct MainView: View {
     @EnvironmentObject var postsVM: ExplorePostsViewModel
     @EnvironmentObject var createPostVM: CreatePostViewModel
     @EnvironmentObject var discoverVM: DiscoverViewModel
-    @EnvironmentObject var wishlistVM: WishlistViewModel
     @EnvironmentObject var keyboardObserver: KeyboardObserver
     
     var body: some View {
@@ -36,15 +35,7 @@ struct MainView: View {
                         .environmentObject(placeVM)
                         .environmentObject(loopVM)
                         .environmentObject(postsVM)
-                case 3: NavigationStack {
-                    ARScreen()
-                        .task {
-                            if let user = userVM.currentUser {
-                                await wishlistVM.loadWishlist(for: user.id)
-                            }
-                        }
-                }
-                case 4: NavigationStack { ProfileView() }
+                case 3: NavigationStack { ProfileView() }
                 default: FeedView()
                 }
             }

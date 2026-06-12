@@ -31,16 +31,12 @@ struct CreatePostFlow: View {
                 }
                 .environmentObject(createPostVM)
 
-            // MARK: Step 2 — Upload Media / AR Asset
+            // MARK: Step 2 — Upload Media
             case .media:
-                if type == .digitalAsset {
-                    ARPostView(selectedTab: $selectedTab)
-                } else {
-                    MediaScreen(screenType: type!) {
-                        step = .loop
-                    }
-                    .environmentObject(createPostVM)
+                MediaScreen(screenType: type!) {
+                    step = .loop
                 }
+                .environmentObject(createPostVM)
 
             // MARK: Step 3 — Choose Loop
             case .loop:
@@ -88,7 +84,6 @@ struct CreatePostFlow: View {
 // MARK: - Types
 enum ContributionType: String, CaseIterable {
     case placePost
-    case digitalAsset
 }
 
 enum CreateStep {
@@ -116,10 +111,10 @@ struct ChooseTypeScreen: View {
             }
             .buttonStyle(ContributionButtonStyle())
 
-            Button("🎨 Dropping a Digital Flex") {
-                onSelect(.digitalAsset)
-            }
-            .buttonStyle(ContributionButtonStyle())
+            Text("Looking to drop a digital flex? Head to the AR Dashboard from the home screen.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .padding()
     }

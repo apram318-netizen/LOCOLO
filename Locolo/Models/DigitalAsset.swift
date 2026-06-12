@@ -27,6 +27,12 @@ struct DigitalAsset: Identifiable, Codable {
     let locationName: String?
     let latitude: Double?
     let longitude: Double?
+    let address: String?
+    let altitudeM: Double?
+    let animationName: String?
+    let animationIndex: Int?
+    let triggerType: String?
+    let triggerConfig: TriggerConfig?
     let rotationX: Double?
     let rotationY: Double?
     let rotationZ: Double?
@@ -61,6 +67,12 @@ struct DigitalAsset: Identifiable, Codable {
         case visibility, interactionType = "interaction_type"
         case locationName = "location_name"
         case latitude, longitude
+        case address
+        case altitudeM = "altitude_m"
+        case animationName = "animation_name"
+        case animationIndex = "animation_index"
+        case triggerType = "trigger_type"
+        case triggerConfig = "trigger_config"
         case rotationX = "rotation_x"
         case rotationY = "rotation_y"
         case rotationZ = "rotation_z"
