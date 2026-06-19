@@ -160,13 +160,8 @@ struct WishlistCard: View {
     var body: some View {
         Button(action: onCardTap) {
             HStack(spacing: 12) {
-                AsyncImage(url: URL(string: asset.thumbUrl ?? asset.fileUrl)) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    Color.gray.opacity(0.2)
-                }
+                AssetThumbnailView(asset: asset)
                 .frame(width: 80, height: 80)
-                .cornerRadius(12)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(asset.name ?? "Untitled")

@@ -494,6 +494,8 @@ enum CacheMapper {
             fileUrl: fileURLString,
             thumbUrl: thumbURLString,
             fileType: cached.fileType ?? "",
+            mediaUrl: nil,
+            mediaType: nil,
             category: cached.category,
             description: cached.descriptionText,
             hypeCount: hypeCountValue,
@@ -718,4 +720,3 @@ enum CacheMapper {
     
     
 }
-

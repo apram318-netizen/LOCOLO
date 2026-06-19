@@ -171,6 +171,9 @@ final class DigitalAssetRepository {
                 if let pano = asset.panoramaUrl, let url = URL(string: pano), shouldDownload(url: url) {
                     group.addTask { await self.downloadAndCache(url: url, requireImage: false) }
                 }
+                if let media = asset.mediaUrl, let url = URL(string: media), shouldDownload(url: url) {
+                    group.addTask { await self.downloadAndCache(url: url, requireImage: false) }
+                }
             }
         }
     }
@@ -249,6 +252,8 @@ final class DigitalAssetRepository {
                     fileUrl: updated[i].fileUrl,
                     thumbUrl: updated[i].thumbUrl,
                     fileType: updated[i].fileType,
+                    mediaUrl: updated[i].mediaUrl,
+                    mediaType: updated[i].mediaType,
                     category: updated[i].category,
                     description: updated[i].description,
                     hypeCount: updated[i].hypeCount,

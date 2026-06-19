@@ -46,6 +46,9 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         triggerEngine.onListeningHintChanged = { [weak self] hint in
             self?.listeningHint = hint
         }
+        triggerEngine.onPlaybackMessage = { [weak self] message in
+            self?.statusMessage = message
+        }
     }
 
 
@@ -415,5 +418,4 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
 // https://youtu.be/-uhCNRMDDVg?si=Oo0mceDPAjgiEZ8B
 //
 // https://youtu.be/hHSbMkhruOg?si=Q1oY_Lfl_9Jg_wn5
-
 

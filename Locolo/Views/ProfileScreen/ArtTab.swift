@@ -66,14 +66,8 @@ struct ArtTab: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 6) {
                                 ZStack(alignment: .topTrailing) {
-                                    AsyncImage(url: URL(string: asset.thumbUrl ?? asset.fileUrl)) { image in
-                                        image.resizable().scaledToFill()
-                                    } placeholder: {
-                                        Color.gray.opacity(0.15)
-                                    }
+                                    AssetThumbnailView(asset: asset, cornerRadius: 14)
                                     .frame(height: 160)
-                                    .clipped()
-                                    .cornerRadius(14)
                                     
                                     if asset.interactionType == "ar" {
                                         Text("AR")

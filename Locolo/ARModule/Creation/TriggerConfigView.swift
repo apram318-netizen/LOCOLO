@@ -21,14 +21,14 @@ struct TriggerConfigView: View {
 
         switch vm.triggerType {
         case .tap:
-            Text("Animation plays when the viewer taps the asset in AR.")
+            Text("The asset reacts when the viewer taps it in AR.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
         case .proximity:
             VStack(alignment: .leading, spacing: 6) {
                 Slider(value: $vm.triggerDistance, in: 1...50, step: 1)
-                Text("Plays when the viewer comes within \(Int(vm.triggerDistance)) m")
+                Text("Reacts when the viewer comes within \(Int(vm.triggerDistance)) m")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("Tip: GPS accuracy makes distances under ~3 m unreliable.")
@@ -40,7 +40,7 @@ struct TriggerConfigView: View {
             VStack(alignment: .leading, spacing: 6) {
                 TextField("Exact phrase, e.g. \"open sesame\"", text: $vm.triggerPhrase)
                     .textInputAutocapitalization(.never)
-                Text("Plays when the viewer says this phrase out loud.")
+                Text("Reacts when the viewer says this phrase out loud.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -53,7 +53,7 @@ struct TriggerConfigView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                Text("Plays when the viewer moves their phone this way.")
+                Text("Reacts when the viewer moves their phone this way.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

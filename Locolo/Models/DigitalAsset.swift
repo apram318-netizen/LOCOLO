@@ -16,6 +16,8 @@ struct DigitalAsset: Identifiable, Codable {
     let fileUrl: String
     let thumbUrl: String?
     let fileType: String
+    let mediaUrl: String?
+    let mediaType: String?
     let category: String?
     let description: String?
     let hypeCount: Int
@@ -59,6 +61,8 @@ struct DigitalAsset: Identifiable, Codable {
         case fileUrl = "file_url"
         case thumbUrl = "thumb_url"
         case fileType = "file_type"
+        case mediaUrl = "media_url"
+        case mediaType = "media_type"
         case category, description
         case hypeCount = "hype_count"
         case viewCount = "view_count"

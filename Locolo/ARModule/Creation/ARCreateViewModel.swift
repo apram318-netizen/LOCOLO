@@ -35,6 +35,9 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     @Published var localFileURL: URL?        // user-picked model file (fbx/usdz)
     @Published var uploadedFileURL: URL?     // Supabase public URL after upload
     @Published var fileType: String = "usdz" // auto-inferred from file extension
+    @Published var localMediaURL: URL?       // optional audio/video attached to the asset
+    @Published var uploadedMediaURL: URL?
+    @Published var mediaType: String = "none"
 
     // MARK: AR capture
     @Published var transform: Transform?     // placement rotation/scale from AR
@@ -84,6 +87,29 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     func setPickedFile(_ url: URL) {
         localFileURL = url
         fileType = url.pathExtension.lowercased()
+    }
+
+    // MARK: FUNCTION: setPickedMediaFile
+    /// - Description: Sets an optional audio/video file that plays when the
+    /// viewer triggers this AR asset.
+    func setPickedMediaFile(_ url: URL) {
+        localMediaURL = url
+        uploadedMediaURL = nil
+
+        let ext = url.pathExtension.lowercased()
+        if ["mp4", "mov", "m4v"].contains(ext) {
+            mediaType = "video"
+        } else if ["mp3", "m4a", "wav", "aac", "caf"].contains(ext) {
+            mediaType = "audio"
+        } else {
+            mediaType = "audio"
+        }
+    }
+
+    func clearPickedMediaFile() {
+        localMediaURL = nil
+        uploadedMediaURL = nil
+        mediaType = "none"
     }
     
     
@@ -186,6 +212,52 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             print(" Upload failed:", error)
         }
     }
+
+    // MARK: FUNCTION: uploadMediaAttachmentIfNeeded
+    /// - Description: Uploads the optional sidecar audio/video file to the same
+    /// digital assets bucket. This is intentionally separate from the model
+    /// upload so static AR assets still have a simple path.
+    private func uploadMediaAttachmentIfNeeded(bucket: String = "digital_assets") async throws -> URL? {
+        if let uploadedMediaURL { return uploadedMediaURL }
+        guard let url = localMediaURL else { return nil }
+
+        let data = try secureFileData(from: url)
+        let ext = url.pathExtension.lowercased()
+        let contentType: String
+
+        switch ext {
+        case "mp4":
+            contentType = "video/mp4"
+        case "mov":
+            contentType = "video/quicktime"
+        case "m4v":
+            contentType = "video/x-m4v"
+        case "mp3":
+            contentType = "audio/mpeg"
+        case "m4a":
+            contentType = "audio/mp4"
+        case "wav":
+            contentType = "audio/wav"
+        case "aac":
+            contentType = "audio/aac"
+        case "caf":
+            contentType = "audio/x-caf"
+        default:
+            contentType = mediaType == "video" ? "video/mp4" : "audio/mpeg"
+        }
+
+        let fileName = UUID().uuidString + "-" + url.lastPathComponent
+        let path = "DigitalArtMedia/\(fileName)"
+        let publicURL = try await storage.uploadFile(
+            bucket: bucket,
+            path: path,
+            fileData: data,
+            contentType: contentType
+        )
+        let uploadedURL = URL(string: publicURL)
+        uploadedMediaURL = uploadedURL
+        return uploadedURL
+    }
     
     
     
@@ -251,9 +323,11 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
         }
 
         let hasAnimation = selectedAnimationIndex != nil
-        if hasAnimation && triggerType == .speech
+        let hasTriggerMedia = localMediaURL != nil || uploadedMediaURL != nil
+        let hasTriggerPayload = hasAnimation || hasTriggerMedia
+        if hasTriggerPayload && triggerType == .speech
             && triggerPhrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            error = "Enter the phrase that should trigger the animation."
+            error = "Enter the phrase that should trigger this asset."
             return
         }
 
@@ -290,6 +364,8 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             let locationId = locRow.location_id
             print(" Location row inserted → id:", locationId)
 
+            let mediaURL = try await uploadMediaAttachmentIfNeeded()
+
             // 2. Insert digital asset
             let newAsset = NewAsset(
                 user_id: userId,
@@ -297,6 +373,8 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
                 description: descriptionText,
                 file_url: uploaded.absoluteString,
                 file_type: fileType,
+                media_url: mediaURL?.absoluteString,
+                media_type: mediaURL == nil ? nil : mediaType,
                 category: "ar_model",
                 visibility: visibility,
                 location_id: locationId,
@@ -308,8 +386,8 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
                 scale_z: Double(scale.z),
                 animation_name: selectedAnimationIndex.flatMap { availableAnimations.indices.contains($0) ? availableAnimations[$0] : nil },
                 animation_index: selectedAnimationIndex,
-                trigger_type: hasAnimation ? triggerType.rawValue : nil,
-                trigger_config: hasAnimation ? currentTriggerConfig() : nil
+                trigger_type: hasTriggerPayload ? triggerType.rawValue : nil,
+                trigger_config: hasTriggerPayload ? currentTriggerConfig() : nil
             )
 
             print(" Uploading asset to 'digital_assets' table...")
@@ -331,6 +409,9 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             step = .file
             localFileURL = nil
             uploadedFileURL = nil
+            localMediaURL = nil
+            uploadedMediaURL = nil
+            mediaType = "none"
             transform = nil
             name = ""
             descriptionText = ""
@@ -435,6 +516,8 @@ struct NewAsset: Encodable {
     let description: String?
     let file_url: String
     let file_type: String
+    let media_url: String?
+    let media_type: String?
     let category: String
     let visibility: String
     let location_id: UUID

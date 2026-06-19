@@ -135,13 +135,8 @@ struct CollectionCard: View {
         HStack(alignment: .top, spacing: 12) {
             
             // Thumbnail
-            AsyncImage(url: URL(string: asset.thumbUrl ?? asset.fileUrl)) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Color.gray.opacity(0.2)
-            }
+            AssetThumbnailView(asset: asset)
             .frame(width: 80, height: 80)
-            .cornerRadius(12)
 
             
             VStack(alignment: .leading, spacing: 8) {
@@ -160,11 +155,11 @@ struct CollectionCard: View {
                     
                     Spacer()
                     
-                    Text(asset.visibility.capitalized ?? "Normal")
+                    Text(asset.visibility.capitalized)
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(AppColors.rarityGradient(asset.visibility ?? "normal"))
+                        .background(AppColors.rarityGradient(asset.visibility))
                         .cornerRadius(12)
                         .foregroundColor(.white)
                 }
@@ -176,7 +171,7 @@ struct CollectionCard: View {
                         Text("Hypes")
                             .font(.caption)
                             .foregroundColor(AppColors.secondaryText)
-                        Text("\(asset.hypeCount ?? 0)")
+                        Text("\(asset.hypeCount)")
                             .font(.subheadline)
                             .bold()
                             .foregroundColor(AppColors.primaryText)
@@ -186,7 +181,7 @@ struct CollectionCard: View {
                         Text("Views")
                             .font(.caption)
                             .foregroundColor(AppColors.secondaryText)
-                        Text("\(asset.viewCount ?? 0)")
+                        Text("\(asset.viewCount)")
                             .font(.subheadline)
                             .bold()
                             .foregroundColor(AppColors.primaryText)

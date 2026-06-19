@@ -164,13 +164,8 @@ struct ArtworkCard: View {
             
             HStack(spacing: 12) {
                 // Thumbnail
-                AsyncImage(url: URL(string: asset.thumbUrl ?? asset.fileUrl)) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    AppColors.secondaryText.opacity(0.3)
-                }
+                AssetThumbnailView(asset: asset)
                 .frame(width: 80, height: 80)
-                .cornerRadius(12)
                 
                 
                 // TEXT

@@ -4,7 +4,7 @@
 //
 //  Owns the per-asset trigger detectors during an AR session. Assets are
 //  registered as they're placed; when an asset's trigger fires, the engine
-//  plays the animation the poster chose for it.
+//  plays the animation and/or sidecar media the poster chose for it.
 //
 
 import Foundation
@@ -23,20 +23,26 @@ final class TriggerEngine {
     private var placed: [UUID: Placed] = [:]
     private let speech = SpeechTriggerService()
     private let shake = ShakeDetector()
+    private let mediaPlayer = ARMediaPlaybackController()
 
     /// Set when speech listening starts, for the status banner.
     var onListeningHintChanged: ((String?) -> Void)?
+    var onPlaybackMessage: ((String) -> Void)?
 
     // MARK: Register a placed asset
     /// - Description: Called after a model is anchored. Sets up whichever
-    /// detector its trigger needs. Assets without an animation are ignored.
+    /// detector its trigger needs. Assets without animation or media are ignored.
     func register(asset: DigitalAsset, rootEntity: Entity) {
-        guard asset.animationIndex != nil || asset.animationName != nil,
+        let hasAnimation = asset.animationIndex != nil || asset.animationName != nil
+        let hasMedia = asset.mediaUrl != nil
+
+        guard hasAnimation || hasMedia,
               let triggerRaw = asset.triggerType,
               let trigger = TriggerType(rawValue: triggerRaw)
         else { return }
 
         placed[asset.id] = Placed(asset: asset, root: rootEntity)
+        mediaPlayer.onPlaybackMessage = onPlaybackMessage
 
         switch trigger {
         case .tap:
@@ -110,14 +116,18 @@ final class TriggerEngine {
         }
     }
 
-    // MARK: Fire an asset's animation
+    // MARK: Fire an asset's animation/media
     /// - Description: Resolves the stored animation (index first, then name,
-    /// then first available) and plays it once. Animations must be played by
-    /// an entity in the owning hierarchy, so falls back to the first
-    /// descendant that owns any if the root has none.
+    /// then first available) and plays it once. Also plays any attached
+    /// sidecar media.
     func fire(_ id: UUID) {
         guard let entry = placed[id] else { return }
 
+        playAnimationIfAvailable(for: entry)
+        mediaPlayer.playMedia(for: entry.asset)
+    }
+
+    private func playAnimationIfAvailable(for entry: Placed) {
         let host = entityWithAnimations(in: entry.root) ?? entry.root
         let animations = host.availableAnimations
         guard !animations.isEmpty else { return }
@@ -149,6 +159,7 @@ final class TriggerEngine {
     func teardown() {
         speech.stop()
         shake.stop()
+        mediaPlayer.stopAll()
         placed.removeAll()
         onListeningHintChanged?(nil)
     }
