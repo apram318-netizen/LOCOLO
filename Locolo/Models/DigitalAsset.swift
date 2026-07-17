@@ -43,6 +43,7 @@ struct DigitalAsset: Identifiable, Codable {
     let scaleZ: Double?
     
     
+    
     ///Offers Now
     let isForSale: Bool?
     let acceptsOffers: Bool?

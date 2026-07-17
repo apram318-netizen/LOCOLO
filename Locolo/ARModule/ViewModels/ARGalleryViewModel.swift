@@ -2,77 +2,123 @@
 //  ARGalleryViewModel.swift
 //  Locolo
 //
-//  Created by Apramjot Singh on 2/11/2025.
+//  Backs the AR Search tab: full asset catalogue with text search,
+//  category filtering, sorting, and marketplace filters.
 //
-
 
 import SwiftUI
 import Foundation
 
-// MARK: - ViewModel
-
-// applying search and category filters, and exposing data to the SwiftUI view layer.
 @MainActor
 final class ARGalleryViewModel: ObservableObject {
+
+    // MARK: - Sorting
+
+    enum SortOption: String, CaseIterable, Identifiable {
+        case popular = "Most Popular"
+        case newest = "Newest"
+        case oldest = "Oldest"
+        case nearest = "Nearest"
+
+        var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .popular: return "flame"
+            case .newest: return "clock"
+            case .oldest: return "clock.arrow.circlepath"
+            case .nearest: return "location"
+            }
+        }
+    }
+
     // MARK: - Published State
-    @Published var artworks: [DigitalAsset] = []      // all fetched assets
-    @Published var searchQuery: String = ""           // search filter text
-    @Published var selectedCategory: String = "all"   // active category filter
-    @Published var isLoading: Bool = false            // loading state
-    @Published var errorMessage: String?              // holds user-facing error messages
+
+    @Published var artworks: [DigitalAsset] = []
+    @Published var searchQuery: String = ""
+    @Published var selectedCategory: String = "all"
+    @Published var sortOption: SortOption = .popular
+    @Published var onlyForSale = false
+    @Published var onlyAcceptsOffers = false
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String?
 
     private let repo = DigitalAssetRepository()
 
-    // MARK: - Computed Property: filteredArtworks
-    /// - Description: Returns artworks filtered by search query and category.
-    /// - Parameter [DigitalAsset]: The list that includes almost all that are being displayed
-    /// - Logic:
-    ///   - Matches items if their description or category contains the search text.
-    ///   - If a category other than all is selected, only shows matching ones.
+    var hasActiveFilters: Bool {
+        selectedCategory != "all" || onlyForSale || onlyAcceptsOffers
+    }
+
+    // MARK: - Filtering + sorting
+
+    /// Search text + category + marketplace filters + sort, in that order.
     var filteredArtworks: [DigitalAsset] {
-        artworks.filter { art in
+        let filtered = artworks.filter { art in
             let matchesSearch =
                 searchQuery.isEmpty ||
+                (art.name ?? "").localizedCaseInsensitiveContains(searchQuery) ||
                 (art.description ?? "").localizedCaseInsensitiveContains(searchQuery) ||
-                (art.category ?? "").localizedCaseInsensitiveContains(searchQuery)
-            
+                (art.category ?? "").localizedCaseInsensitiveContains(searchQuery) ||
+                (art.displayLocation ?? "").localizedCaseInsensitiveContains(searchQuery)
+
             let matchesCategory =
                 selectedCategory == "all" ||
                 (art.category?.lowercased() == selectedCategory.lowercased())
 
-            return matchesSearch && matchesCategory
+            let matchesSale = !onlyForSale || art.isForSale == true
+            let matchesOffers = !onlyAcceptsOffers || art.acceptsOffers == true
+
+            return matchesSearch && matchesCategory && matchesSale && matchesOffers
+        }
+
+        switch sortOption {
+        case .popular:
+            return filtered.sorted { $0.engagementScore > $1.engagementScore }
+        case .newest:
+            return filtered.sorted { $0.createdAt > $1.createdAt }
+        case .oldest:
+            return filtered.sorted { $0.createdAt < $1.createdAt }
+        case .nearest:
+            return filtered.sorted {
+                ($0.distanceMeters ?? .greatestFiniteMagnitude) <
+                ($1.distanceMeters ?? .greatestFiniteMagnitude)
+            }
         }
     }
 
-    
-    // MARK: - FUNCTION: loadArtworks
-    /// - Description: Fetches all digital assets from the repository and updates the view state.
-    /// Called when the gallery view appears or on pull-to-refresh.
-    ///
-    /// - Throws: Sets an error message if fetching fails.
-    func loadArtworks() async {
-        isLoading = true
-        do {
-            artworks = await repo.fetchAll()
-            for art in artworks.prefix(3) {
-                print("asset:", art.id, "thumb:", art.thumbUrl ?? "nil", "file:", art.fileUrl)
-                
-                if let thumb = art.thumbUrl, let url = URL(string: thumb) {
-                    print("-----thumb exists?", FileManager.default.fileExists(atPath: url.path))
-                    let data = try? Data(contentsOf: url)
-                    print("---thumb bytes:", data?.count ?? 0)
-                    if let data, UIImage(data: data) == nil {
-                        print("-----thumb data isn't a decodable image")
-                    }
-                }
-            }
-            
-            errorMessage = nil
-        } catch {
-            errorMessage = "Failed to load artworks: \(error.localizedDescription)"
+    /// Categories that actually occur in the catalogue, most common first.
+    /// Drives the "Browse categories" grid and trending chips.
+    var categoryCounts: [(category: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for art in artworks {
+            let cat = (art.category ?? "other").lowercased()
+            counts[cat, default: 0] += 1
         }
+        return counts.sorted { $0.value > $1.value }
+            .map { (category: $0.key, count: $0.value) }
+    }
+
+    /// Names of the most engaged-with assets — the "Trending searches" chips.
+    var trendingNames: [String] {
+        artworks
+            .sorted { $0.engagementScore > $1.engagementScore }
+            .prefix(6)
+            .compactMap(\.name)
+    }
+
+    func resetFilters() {
+        selectedCategory = "all"
+        onlyForSale = false
+        onlyAcceptsOffers = false
+        sortOption = .popular
+    }
+
+    // MARK: - Loading
+
+    func loadArtworks() async {
+        isLoading = artworks.isEmpty
+        artworks = await repo.fetchAll()
+        errorMessage = nil
         isLoading = false
     }
-    
-    
 }

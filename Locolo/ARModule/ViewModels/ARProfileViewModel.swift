@@ -2,9 +2,10 @@
 //  ARProfileViewModel.swift
 //  Locolo
 //
-//  Backs the AR dashboard profile: the user's own digital assets and the
-//  assets they've explored (seen in an AR session). No posts/places here —
-//  that stays in the main app profile.
+//  Backs the AR Creator Dashboard: the user's own digital assets, the
+//  assets they've explored in AR sessions, and marketplace data (offers
+//  received, revenue, portfolio value) plus the aggregates the analytics
+//  charts draw from. No posts/places here — that stays in the main app.
 //
 
 import Foundation
@@ -14,21 +15,100 @@ import Supabase
 final class ARProfileViewModel: ObservableObject {
     @Published var ownAssets: [DigitalAsset] = []
     @Published var exploredAssets: [DigitalAsset] = []
+    @Published var offersByAsset: [UUID: [Offer]] = [:]
     @Published var isLoading = false
+    @Published var isLoadingOffers = false
     @Published var errorMessage: String?
 
     private let client = SupabaseManager.shared.client
+    private let assetRepo = DigitalAssetRepository()
 
-    /// Total views across the user's own assets, for the header stats.
-    var totalViews: Int {
-        ownAssets.reduce(0) { $0 + $1.viewCount }
+    // MARK: - Overview stats
+
+    var totalViews: Int { ownAssets.reduce(0) { $0 + $1.viewCount } }
+    var totalHype: Int { ownAssets.reduce(0) { $0 + $1.hypeCount } }
+
+    var topAsset: DigitalAsset? {
+        ownAssets.max { $0.engagementScore < $1.engagementScore }
     }
 
-    // MARK: Load both sections
+    // MARK: - Marketplace insights
+
+    var allOffers: [Offer] { offersByAsset.values.flatMap { $0 } }
+
+    var pendingOffers: [Offer] { allOffers.filter { $0.status == "pending" } }
+
+    /// Sum of accepted offers — realised earnings.
+    var revenue: Double {
+        allOffers.filter { $0.status == "accepted" }.reduce(0) { $0 + $1.price }
+    }
+
+    /// Sum of listed values across the portfolio.
+    var portfolioValue: Double {
+        ownAssets.reduce(0) { $0 + ($1.currentValue ?? 0) }
+    }
+
+    var highestOpenOffer: Double? {
+        pendingOffers.map(\.price).max()
+    }
+
+    /// Assets that have at least one pending offer, best offer first.
+    var assetsWithPendingOffers: [(asset: DigitalAsset, best: Double, count: Int)] {
+        ownAssets.compactMap { asset in
+            let pending = (offersByAsset[asset.id] ?? []).filter { $0.status == "pending" }
+            guard let best = pending.map(\.price).max() else { return nil }
+            return (asset: asset, best: best, count: pending.count)
+        }
+        .sorted { $0.best > $1.best }
+    }
+
+    // MARK: - Analytics aggregates
+
+    /// Top assets by view count, for the horizontal bar chart.
+    var topAssetsByViews: [(name: String, views: Int)] {
+        ownAssets
+            .sorted { $0.viewCount > $1.viewCount }
+            .prefix(5)
+            .map { (name: $0.name ?? "Untitled", views: $0.viewCount) }
+    }
+
+    /// Uploads bucketed by month, oldest first, for the area chart.
+    var uploadsByMonth: [(month: Date, count: Int)] {
+        let calendar = Calendar.current
+        var buckets: [Date: Int] = [:]
+        for asset in ownAssets {
+            let comps = calendar.dateComponents([.year, .month], from: asset.createdAt)
+            if let month = calendar.date(from: comps) {
+                buckets[month, default: 0] += 1
+            }
+        }
+        return buckets.sorted { $0.key < $1.key }
+            .map { (month: $0.key, count: $0.value) }
+    }
+
+    /// Fixed category order so chart colors stay stable per category
+    /// regardless of which categories the user currently has.
+    static let categoryOrder = ["art", "photo", "3d", "audio", "other"]
+
+    /// Own assets per category, in the fixed canonical order.
+    var categoryBreakdown: [(category: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for asset in ownAssets {
+            var cat = (asset.category ?? "other").lowercased()
+            if !ARProfileViewModel.categoryOrder.contains(cat) { cat = "other" }
+            counts[cat, default: 0] += 1
+        }
+        return ARProfileViewModel.categoryOrder.compactMap { cat in
+            guard let count = counts[cat] else { return nil }
+            return (category: cat, count: count)
+        }
+    }
+
+    // MARK: - Loading
+
     func load(userId: UUID) async {
-        isLoading = true
+        isLoading = ownAssets.isEmpty
         errorMessage = nil
-        defer { isLoading = false }
 
         do {
             async let own: [DigitalAsset] = client
@@ -46,5 +126,35 @@ final class ARProfileViewModel: ObservableObject {
         } catch {
             errorMessage = "Failed to load profile: \(error.localizedDescription)"
         }
+        isLoading = false
+
+        await loadOffers()
+    }
+
+    /// Fetch offers for every asset that accepts them, concurrently.
+    private func loadOffers() async {
+        let offerable = ownAssets.filter { $0.acceptsOffers == true || $0.isForSale == true }
+        guard !offerable.isEmpty else {
+            offersByAsset = [:]
+            return
+        }
+
+        isLoadingOffers = true
+        var result: [UUID: [Offer]] = [:]
+
+        await withTaskGroup(of: (UUID, [Offer]).self) { group in
+            for asset in offerable {
+                group.addTask { [assetRepo] in
+                    let offers = (try? await assetRepo.fetchOffers(for: asset.id)) ?? []
+                    return (asset.id, offers)
+                }
+            }
+            for await (id, offers) in group {
+                result[id] = offers
+            }
+        }
+
+        offersByAsset = result
+        isLoadingOffers = false
     }
 }
