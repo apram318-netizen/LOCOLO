@@ -18,6 +18,9 @@ final class DeepLinkRouter: ObservableObject {
 
     @Published var pendingAssetId: UUID?
     @Published var pendingUserId: UUID?
+    /// Screens reached from notifications: `locolo://chat/<id>`,
+    /// `locolo://activity`, `locolo://messages`, `locolo://viewer`.
+    @Published var pendingRoute: ARRoute?
 
     /// - Returns: whether the URL was a Locolo link we understood.
     @discardableResult
@@ -28,6 +31,10 @@ final class DeepLinkRouter: ObservableObject {
         }
         if let userId = Self.userId(from: url) {
             pendingUserId = userId
+            return true
+        }
+        if let route = Self.route(from: url) {
+            pendingRoute = route
             return true
         }
         return false
@@ -41,6 +48,28 @@ final class DeepLinkRouter: ObservableObject {
     func consumeUser() -> UUID? {
         defer { pendingUserId = nil }
         return pendingUserId
+    }
+
+    func consumeRoute() -> ARRoute? {
+        defer { pendingRoute = nil }
+        return pendingRoute
+    }
+
+    static func chatURL(for conversationId: String) -> URL? {
+        URL(string: "locolo://chat/\(conversationId)")
+    }
+
+    static func route(from url: URL) -> ARRoute? {
+        guard url.scheme?.lowercased() == "locolo", let host = url.host?.lowercased() else { return nil }
+        switch host {
+        case "chat":
+            guard let id = url.pathComponents.last, id != "/", !id.isEmpty else { return .conversations }
+            return .chat(conversationId: id)
+        case "messages", "inbox": return .conversations
+        case "activity", "notifications": return .activity
+        case "viewer", "ar": return .viewer
+        default: return nil
+        }
     }
 
     static func assetURL(for assetId: UUID) -> URL {

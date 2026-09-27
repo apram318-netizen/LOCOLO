@@ -42,7 +42,9 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             options: []
         )
 
-        center.setNotificationCategories([chatCategory])
+        // setNotificationCategories replaces the whole set, so the AR module's
+        // social / nearby-art categories are registered in the same call.
+        center.setNotificationCategories(ARNotificationRouter.categories.union([chatCategory]))
 
         // the actual permission popup
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
@@ -87,6 +89,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             return
         }
 
+        // Plain taps and the other actions open the right screen.
+        ARNotificationRouter.handle(response)
         completionHandler()
     }
 
@@ -94,12 +98,12 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
     // MARK: - Foreground presentation
     /// when the app is open and a notif comes → we decide how dramatic to be.
-    /// i always want the banner + sound (why would i hide my own app from myself???)
+    /// banner + sound, except for the chat you're already reading.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
 
-        completionHandler([.banner, .sound])   // show it even if you're inside the app
+        completionHandler(ARNotificationRouter.presentationOptions(for: notification))
     }
     
 

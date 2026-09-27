@@ -10,6 +10,7 @@ ranks on. Model: **OpenAI `text-embedding-3-small` (1536 dims)** — must match 
 | `embed-asset` | DB webhook on `digital_assets` INSERT/UPDATE | `x-webhook-secret` header, or the asset's signed-in owner | Embed name+description → `digital_assets.embedding` |
 | `update-taste` | App call on hype/explore | Signed-in user (user = JWT subject) | Fold asset embedding into `users.taste_embedding` (EMA) |
 | `embed-query` | App call on search | Signed-in user | Embed a query string → return vector for `p_query_embedding` |
+| `send-push` | DB webhook on `notifications` INSERT | `x-webhook-secret` header only (deploy with `--no-verify-jwt`) | Deliver a notification to the recipient's iPhones via APNs. Setup: `docs/LOCOLO_AR_STATUS.md` §5.3c |
 
 All three share `_shared/auth.ts`. The gateway's JWT check accepts the public
 anon key, so each function calls `requireUser()` to resolve the real signed-in

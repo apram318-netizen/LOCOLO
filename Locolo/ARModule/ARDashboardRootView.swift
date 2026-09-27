@@ -59,13 +59,18 @@ struct ARDashboardRootView: View {
         }
         // Profile links (locolo://user/<id>) push onto the dashboard stack.
         .onChange(of: deepLinks.pendingUserId) { openPendingProfileLink() }
+        // Notification taps (chat, activity, AR viewer) push their screen.
+        .onChange(of: deepLinks.pendingRoute) { openPendingRoute() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { await ActivityStore.shared.refresh(force: false) }
+                Task { await InboxStore.shared.syncReadState() }
+                BadgeSync.shared.update()
             }
         }
         .task {
             openPendingProfileLink()
+            openPendingRoute()
             if let user = userVM.currentUser {
                 await wishlistVM.loadWishlist(for: user.id)
             }
@@ -89,6 +94,13 @@ struct ARDashboardRootView: View {
         } else if !SafetyService.shared.isBlocked(userId) {
             dashboardState.path.append(.profile(userId: userId))
         }
+    }
+
+    private func openPendingRoute() {
+        guard let route = deepLinks.consumeRoute() else { return }
+        if dashboardState.path.last == route { return }
+        if case .chat(let id) = route, InboxStore.shared.openConversationId == id { return }
+        dashboardState.path.append(route)
     }
 
     // MARK: - Tabs

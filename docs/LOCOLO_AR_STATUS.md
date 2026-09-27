@@ -3,7 +3,7 @@
 > **Audience:** AI coding agents and humans picking up this codebase.
 > **Companion to:** `docs/LOCOLO_AR_RELEASE_SPEC.md` (the WS0–WS9 spec — read it for intent; read THIS for what actually exists and how to finish it).
 > **Last updated:** 2026-09-27 · branch `fresh-start` · simulator build green via `xcodebuild`.
-> **Git state:** all work through stage 5b is committed as `0393ca9` and pushed to **`github/fresh-start`**. GitHub `main` (`447c938`) is a direct ancestor, so merging is a fast-forward (§5.2). **Stage 6 (social network layer, §4.8) is uncommitted** on `fresh-start`.
+> **Git state:** stage 7 (notifications, §4.9) + stage 8 (prod-RPC dump, §5.5) are now committed on `fresh-start` (local; push with §5.2). Stage 6 is `9f73f48`. GitHub `main` (`447c938`) is a direct ancestor of `fresh-start`, so merging is a fast-forward (§5.2).
 
 ---
 
@@ -49,10 +49,11 @@ Key code map:
 | Social | `CreatorProfileView(Model)`, `FollowListView`, `Services/FollowRepository.swift` |
 | Social stores (stage 6) | `Services/{EngagementStore,FollowStore,InboxStore,ActivityStore,CreatorCache,SocialSession,CommentsRepository,PeopleSearch}.swift` |
 | Social UI (stage 6) | `ARSocialComponents.swift`, `Dashboard/{CommentsSheet,ARActivityView,AREditProfileView,ARMessagesView,ARSocialAssetCard}.swift`, `ARTabBar.swift` |
+| Notifications (stage 7) | `Services/{ARNotificationRouter,PushRegistry,NotificationPreferences,ProximityNotifier}.swift` (+ `BadgeSync`, `ARPushEvents` in the router file); hooks in `NotificationManager`, `AppDelegate`, `ChatViewModel.sendMessage` |
 | Chat (E2E) | `Services/CryptoService.swift`, `Services/KeyDirectory.swift`, `ViewModels/ChatViewModel.swift`, `Views/Messages/ChatView.swift`, `Dashboard/ARChatScreen.swift`, `ARMessagesView.swift` |
 | Safety / account | `Services/SafetyService.swift`, `Dashboard/ReportSheet.swift`, `Dashboard/ARSettingsView.swift` |
-| SQL | `docs/migrations/2026_ar_release.sql` (applied), `2026_ar_safety_and_hardening.sql` (**not applied**), `2026_ar_social.sql` (**not applied**, run after safety) |
-| Edge functions | `supabase/functions/{embed-asset,update-taste,embed-query,_shared}` + `README.md` |
+| SQL | `docs/migrations/2026_ar_release.sql` (applied), `2026_ar_safety_and_hardening.sql` (**not applied**), `2026_ar_social.sql` (**not applied**, run after safety), `2026_ar_notifications.sql` (**not applied**, run after social) |
+| Edge functions | `supabase/functions/{embed-asset,update-taste,embed-query,send-push,_shared}` + `README.md` |
 
 ## 3. Workstream status
 
@@ -133,14 +134,14 @@ Key code map:
 - **Edge functions hardened:** all require a signed-in user (`_shared/auth.ts`). Previously `update-taste` let anyone rewrite anyone's taste vector with the service role, `embed-query` was an open OpenAI proxy, `embed-asset` re-triggered itself on its own UPDATE.
 - `Info.plist`: invalid `Location` background mode removed; photo-library-add string for snapshots.
 
-### 4.8 Social network layer (stage 6, uncommitted)
+### 4.8 Social network layer (stage 6, `9f73f48`)
 Scope rule: stage 6 touches **only `ARModule/` and `docs/`**. No legacy screens, shared models/repositories, `ContentView` or `UsersViewModel` were changed.
 
 - **Shared stores** (all `@MainActor` singletons, started by `SocialSession.start(me:)` from `ARAppRootView.onSignedIn`, torn down on `ARAppRootView.onDisappear`, i.e. sign-out):
   - `EngagementStore`: hyped set, hype counts, comment counts. It loads these in batches for whatever is on screen (one `asset_hype` query plus one `get_comment_counts` call) and toggles hype optimistically. Feed card, detail sheet and profile grid all read from it, so they never disagree. `commentsAvailable` flips false if the social migration isn't applied, and comment UI hides itself.
   - `FollowStore`: your following set. Every Follow button (`ARFollowButton`) and the Following feed use it. `CreatorProfileViewModel` routes through it and syncs its follower count.
-  - `InboxStore`: live Firestore conversation list, peers, unread count. Unread means the thread changed after you last had it open. `ARChatScreen` calls `didOpen`/`didClose`, and threads first seen on a device start as read. Read state is local (`ar.inbox.lastRead`); nothing is sent to the peer and the chat data model is unchanged.
-  - `ActivityStore`: follows, hypes, comments and offers on your assets, aggregated client-side from existing tables. Unread means newer than `ar.activity.lastSeen`, which is set when you leave the Activity screen.
+  - `InboxStore`: live Firestore conversation list, peers, unread count. Unread means the thread changed after you last had it open. `ARChatScreen` calls `didOpen`/`didClose`, and threads first seen on a device start as read. Read state is cached locally (`ar.inbox.lastRead`) and, since stage 7, synced across your own devices (§4.9); nothing is sent to the peer and the chat data model is unchanged.
+  - `ActivityStore`: the activity feed. Since stage 7 it reads the server `notifications` table (§4.9); before that migration it aggregates follows, hypes, comments and offers client-side, and unread means newer than `ar.activity.lastSeen` (set when you leave the Activity screen).
   - `CreatorCache`: one batch-loaded `ARCreator` cache for every surface.
 - **Comments:** `CommentsSheet` (resizable) offers a threaded list, a composer with quick emoji reactions, reply-by-mention, a "Creator" tag on the author's own comments, swipe/long-press Delete (own comment or your asset) and Report (reason picker via `SafetyService.reportComment`, with instant local hide), plus Block. Blocked users are filtered out. It degrades to "Comments are coming soon" before the migration.
 - **Feed card:** creator row with inline Follow, relative time and place, and a "…" menu (share, copy link, report). 4:3 media with **double-tap to hype** and a burst animation. Action row: hype with live count, comments with count, share (deep link; this used to share the raw file URL), View in AR (≤ 150 m), and save (bookmark). Caption shows "View all N comments" and explorer count.
@@ -154,6 +155,66 @@ Scope rule: stage 6 touches **only `ARModule/` and `docs/`**. No legacy screens,
 - **Edit profile** (`ARRoute.editProfile`, `AREditProfileView`): cover and avatar upload (compressed), display name (40), username (3–30 chars from `[a-z0-9._]` with a live availability check) and bio (150). Saves via `userVM.updateProfile`; a unique-violation shows "That username is taken".
 - **Search:** a **Creators** rail (username/name `ilike`, ranked exact handle → prefix → verified) with Follow buttons, above asset results.
 - **Deep links:** `locolo://user/<id>` (also `/profile/<id>`) → `DeepLinkRouter.pendingUserId`, consumed by `ARDashboardRootView`. Your own id switches to the Profile tab. Share sheets use `DeepLinkRouter.userURL(for:)`.
+
+### 4.9 Notifications (stage 7, uncommitted)
+Scope: AR module + `docs/` + `supabase/`, plus four small, marked hooks in shared files (listed at the end).
+
+**Events.** Every event becomes one row in `notifications`, written by database triggers (`2026_ar_notifications.sql`). The client never inserts them.
+
+| Type | Trigger | Recipient | Push copy (`send-push`) |
+|---|---|---|---|
+| `follow` | `follows` insert, or status changes to accepted (unfollowing removes the unread row) | followee | "Maya · @maya — started following you." |
+| `hype` | `asset_hype` insert (un-hype removes the unread row) | owner | "⚡ Maya hyped “Neon Koi”" |
+| `comment` | `asset_comments` insert | owner | "Maya commented on “Neon Koi”" + the comment |
+| `mention` | `@handle` in a comment (max 5; only people who can see the asset) | mentioned user | "Maya mentioned you on “Neon Koi”" |
+| `offer` | `offers` insert | owner | "💰 New offer: $25.00" |
+| `offer_status` | offer accepted or rejected | buyer | "🎉 Offer accepted" / "Offer declined" |
+| `new_post` | `digital_assets` insert (public or friends visibility) | every follower | "✨ Maya dropped something new" |
+| `discovery` | new unique explorer (`asset_views` insert; max 1 unread per asset per hour) | owner | "🧭 Sam discovered “Neon Koi”" |
+| `milestone` | `hype_count` / `view_count` crosses 10, 25, 50, 100, 250… | owner | "🔥 “Neon Koi” hit 100 hypes" |
+| `message` | `notify_message` RPC, called by `ChatViewModel.sendMessage` after a successful send | peer | "Maya — 🔒 New message" (never the body; E2E) |
+
+`_notify()` is the only insert path. It skips self-notifications and actors the recipient has blocked, and drops a follow or hype repeated within 24 h. `notify_message` is rate-limited to 60 per sender per 10 minutes, and keeps one fresh unread row per conversation.
+
+**Delivery.**
+- **Remote push:** a Database Webhook on `notifications` INSERT calls `supabase/functions/send-push`.
+  - It checks `notification_prefs`, composes the copy, sets the badge to the recipient's unread count, and sends to APNs over HTTP/2 with an ES256 JWT (no FCM).
+  - It picks the sandbox or production host per token, and deletes tokens APNs rejects (410 / BadDeviceToken / Unregistered).
+  - Grouping: `thread-id` per asset or conversation. Collapsing: `apns-collapse-id` per chat and per follower.
+  - Categories: `CHAT_MESSAGE` (quick reply) or `SOCIAL`.
+- **Local fallback:** until `app_config.push_enabled` is true (`PushRegistry.serverPushActive`), the app posts the same events as local notifications while it's running.
+  - `ActivityStore` covers new activity: at most 3 individually, otherwise one summary. The first load on a device counts as backlog and doesn't alert.
+  - `InboxStore` covers new messages in threads you don't have open: "🔒 New message", with quick reply.
+  - Background location wakes refresh activity every ≤ 5 minutes (`SocialSession`). Once push is live, the fallbacks switch off, so nothing arrives twice.
+- **Tokens:** `PushRegistry` registers through `register_device_token`, which reassigns a shared phone to whoever is signed in. It sends the environment (`#if DEBUG` → sandbox) and the bundle id. `ARSettingsView.signOut` unregisters the token before logout.
+
+**Read state follows the account, not the device.**
+- Activity: server `read_at`. Leaving the Activity screen marks everything read everywhere; swipe to clear deletes a row.
+- Messages: `conversation_reads` rows (batched upserts every 1.5 s). They merge into the local cache on sign-in and on every foreground. A trigger marks that conversation's message notifications read, so the badge drops on every device.
+- `BadgeSync` keeps the app-icon badge equal to activity unread plus conversations unread.
+
+**Routing.** `NotificationManager` stays the delegate (it owns quick reply) and forwards to `ARNotificationRouter`.
+- Taps open `userInfo.url` through `DeepLinkRouter`: `locolo://asset/…`, `locolo://user/…`, and the new `locolo://chat/<id>`, `locolo://activity`, `locolo://messages` and `locolo://viewer` routes (`pendingRoute`, consumed by `ARDashboardRootView`).
+- Older chat notifications, which only carry `conversationId`, still open their thread.
+- In the foreground, the banner is hidden for the chat you're reading, and social pushes refresh Activity immediately.
+
+**Nearby AR art (`ProximityNotifier`).**
+- Example: title "✨ “Neon Koi” is 43 m away", subtitle "AR art by @maya", body "43 m north-east of you near Federation Square · Sculpture. Open the AR camera to discover it. +2 more AR creations within 100 m."
+  - It adds a thumbnail attachment and actions **View in AR** / **Details**.
+  - It says "You've found this one before" when `DiscoveryStore` knows the asset.
+- Rides `LocationManager.$userLocation` (no extra GPS session). Fetches `get_nearby_assets_full` within 1 km, again after moving 300 m or after 10 minutes.
+- Alerts within **100 m** and re-arms only after you're more than 150 m away. Each asset waits 6 h; globally at most one alert per 3 minutes and 12 per day. The nearest asset wins.
+- Skips your own assets, blocked creators, reported assets, and the open AR viewer.
+- Geofences the 15 nearest candidates (needs Always location), so iOS relaunches the app for an alert even after termination. `AppDelegate` creates the notifier at launch for this.
+- Uses the local preferences mirror, so it works on a background relaunch.
+
+**Settings.** New Notifications section with toggles for new followers, hypes, comments, mentions, messages, offers, new from people you follow, discoveries & milestones, and AR art nearby. The toggles are stored server-side (`notification_prefs`, which `send-push` respects) and mirrored locally (for local and nearby alerts). It also shows a "Notifications are off" prompt with Open Settings when permission is denied, and a Turn on button when not yet asked.
+
+**Shared-file hooks (outside `ARModule/`):**
+- `NotificationManager`: registers the AR categories alongside `CHAT_MESSAGE`; forwards non-reply taps and foreground presentation to the router.
+- `AppDelegate`: APNs token callbacks → `PushRegistry`; creates `ProximityNotifier` at launch.
+- `ChatViewModel`: remembers the resolved peer and calls `ARPushEvents.messageSent` after a successful send.
+- `Info.plist`: adds `remote-notification` to `UIBackgroundModes`.
 
 ## 5. Instructions / runbooks
 
@@ -190,6 +251,36 @@ Until this runs, **anyone with the anon key can read every user's email and hype
 2. Verify: `curl -s "https://zvrrbtiqsyzkyixbsybf.supabase.co/rest/v1/asset_comments?select=comment_id&limit=1" -H "apikey: $KEY" -H "Authorization: Bearer $KEY"` should return `[]` or permission denied, **not** a "relation does not exist" error.
 3. In the app: the comment button appears on feed cards; post, delete and report a comment; counts update on card and detail sheet together.
 4. Comment moderation: `select * from public.content_reports where comment_id is not null and status = 'open';` then `delete from public.asset_comments where comment_id = '<uuid>';`.
+
+### 5.3c Notifications: migration, push function, webhook, capability (after §5.3b)
+The app works before any of this: Activity falls back to client aggregation, and alerts are local while the app runs. Each step below adds more.
+
+1. **Migration.** SQL Editor → paste `docs/migrations/2026_ar_notifications.sql` → Run. It's idempotent and adds `notifications`, `notification_prefs`, `device_tokens`, `conversation_reads`, `app_config`, all the triggers, and the `register_device_token` / `unregister_device_token` / `notify_message` RPCs.
+   - Check: in the app, follow a second account; that account's Activity shows the follow and its bell badges. Reading on one device clears it on the other.
+2. **APNs key** (Apple Developer → Keys → + → Apple Push Notifications service). Download `AuthKey_XXXXXXXXXX.p8` once and note the Key ID and Team ID. The key must belong to the team that owns the bundle id you ship:
+   - Debug: `com.apram.locolo`, team `RB24MJ38LB`.
+   - Release: `edu.monash.Locolo`, team `MDUMW2CFXU`.
+3. **Push capability.** Xcode → Locolo target → Signing & Capabilities → **+ Capability → Push Notifications**. This creates `Locolo.entitlements` with `aps-environment` and updates the App ID.
+   - A free personal team can't use this capability, which is why it isn't committed.
+   - Without it, token registration fails quietly and the app keeps using local fallbacks.
+4. **Deploy:**
+   ```bash
+   supabase functions deploy send-push --no-verify-jwt
+   supabase secrets set PUSH_WEBHOOK_SECRET=$(openssl rand -hex 24) \
+     APNS_KEY_ID=XXXXXXXXXX APNS_TEAM_ID=XXXXXXXXXX \
+     APNS_PRIVATE_KEY="$(cat AuthKey_XXXXXXXXXX.p8)" APNS_BUNDLE_ID=com.apram.locolo
+   ```
+5. **Webhook.** Database → Webhooks → Create: table `notifications`, event **INSERT**, type Supabase Edge Function → `send-push`, HTTP header `x-webhook-secret: <PUSH_WEBHOOK_SECRET>`.
+6. **Flip the flag** (this turns the app's local fallbacks off, so nothing arrives twice):
+   ```sql
+   update public.app_config set value = 'true' where key = 'push_enabled';
+   ```
+7. **Test:** on a device build, sign in, allow notifications, and check `select * from device_tokens;`. Then get followed or messaged from another account; the push arrives with the app closed. Function logs: Dashboard → Edge Functions → send-push → Logs.
+8. **Optional:** nightly prune of read notifications older than 90 days: `select cron.schedule('prune-notifications', '17 3 * * *', 'select public.prune_notifications()');`.
+
+Notes:
+- `new_post` fans out one row per follower, and so one webhook call each. That's fine at current scale; batch it if a creator passes ~5k followers.
+- The dormant `LocoloNotificationService` extension target is still a macOS target and isn't embedded. `send-push` doesn't set `mutable-content`, so it isn't needed.
 
 ### 5.4 Deploy the edge functions
 Full steps in `supabase/functions/README.md`. Summary:
@@ -246,6 +337,15 @@ update public.content_reports set status = 'actioned', reviewed_at = now() where
 - [ ] Edit profile: change avatar/cover/username; a taken username is rejected; new name shows on cards.
 - [ ] `locolo://user/<id>` opens the profile (cold launch too); Share profile produces that link.
 - [ ] Sign out and in as another user → no stale follows, unread or activity.
+- [ ] Walk toward someone's asset: an alert at ≤ 100 m shows the name, exact metres, direction, @creator and a thumbnail. **View in AR** opens the viewer and **Details** opens the asset. Standing still doesn't re-alert; walking > 150 m away and back after 6 h does.
+- [ ] Kill the app (Always location on), walk to an asset → the nearby alert still arrives (geofence relaunch).
+- [ ] No nearby alert for your own assets, blocked creators, or while the AR viewer is open. The Settings toggle off → silence.
+- [ ] Before push is live: B follows / hypes / comments on / mentions A, or makes an offer, while A has the app in the background → A gets a local alert for each, and a summary if more than 3 arrive.
+- [ ] After §5.3c: the same events arrive with the app killed. Tapping each opens the right screen (profile, asset, chat, Activity). The app badge equals the unread total.
+- [ ] Message A → B while B is on another thread → banner. While B has that thread open → no banner. Quick reply from the banner sends encrypted.
+- [ ] Read a thread on device 1 → it's no longer unread on device 2 after foregrounding. Activity read on one device → read on the other.
+- [ ] Accept an offer → the buyer gets "Offer accepted". Publish a public asset → followers get "dropped something new". Hit 10 hypes → the owner gets a milestone.
+- [ ] Sign out → `device_tokens` row removed; the next account on the phone gets only its own pushes.
 
 ### 5.8 Chat identity binding (before public launch)
 Firebase auth is anonymous, so `senderId` is spoofable and `firestore.rules` can't be deployed (it would block all chat). Options:
@@ -273,6 +373,7 @@ Firebase auth is anonymous, so `senderId` is spoofable and `firestore.rules` can
 9. **Permission strings** live as `INFOPLIST_KEY_*` in `project.pbxproj`; `Info.plist` merges on top.
 10. **Simulator-guard all AR/Vision code.**
 11. **Social state goes through the stores.** Hype via `EngagementStore.toggleHype`, follows via `FollowStore.toggle`/`ARFollowButton`, user rows via `CreatorCache`. Per-view copies drift. New stores must be reset in `SocialSession.end()`.
+12. **Notifications are written by the database, never the client.** Add a new event as a trigger calling `_notify()` (which applies self, block and dedupe rules), add its copy in `send-push` and `ActivityStore.localCopy`, map it in `NotificationPrefs.allows(type:)`, and render it in `ARActivityView`. Push payloads never carry chat text. Keep `NotificationManager` as the only `UNUserNotificationCenter` delegate, and register categories there in one `setNotificationCategories` call (it replaces the set).
 
 ## 7. Remaining work & known gaps
 
@@ -280,16 +381,18 @@ Firebase auth is anonymous, so `senderId` is spoofable and `firestore.rules` can
 |---|---|---|
 | 🔴 | Apply safety & hardening migration | §5.3 |
 | 🟠 | Apply social migration (comments) | §5.3b |
-| 🟠 | Commit stage 6 | §5.2 |
+| 🟠 | Apply notifications migration | §5.3c step 1 |
+| 🟠 | APNs key + Push capability + `send-push` + webhook + `push_enabled` | §5.3c steps 2–6 |
+| ✅ | ~~Commit stage 7~~ (done) | §5.2 |
 | 🔴 | Chat identity binding (Firebase custom token) | §5.8 |
 | 🟠 | Deploy edge functions + backfill embeddings | §5.4 |
 | 🟠 | On-device field testing | §5.7 |
 | 🟠 | Moderation process owner | §5.6 |
-| 🟡 | Commit prod-only RPC source | §5.5 |
+| ✅ | ~~Commit prod-only RPC source~~ → `docs/migrations/2026_prod_rpcs_dump.sql` | §5.5 |
 | 🟡 | Storage cleanup job for deleted accounts | §5.9 |
 | 🟡 | Merge `fresh-start` → GitHub `main` | §5.2 |
 
-Smaller gaps: no push notifications for follows/hypes/comments (activity is pull-based, refreshed on foreground and pull-to-refresh); inbox read state is per device; activity aggregation caps at the newest 300 of your assets; no comment likes/threads beyond @mentions; full-text search is client-side (DB `search_tsv` unused); `AssetDetailViewModel` is dead code; 40-entity cap is per placement pass, not a scene total; Collection lists your own creations (no purchase ownership model yet); key rotation makes old messages unreadable (no ratchet / forward secrecy); multiple devices per account = last device's key wins.
+Smaller gaps: push delivery needs §5.3c. Until then alerts are local and only fire while the app is alive, including background location wakes. The client-side fallback aggregation caps at the newest 300 of your assets; no comment likes/threads beyond @mentions; full-text search is client-side (DB `search_tsv` unused); `AssetDetailViewModel` is dead code; 40-entity cap is per placement pass, not a scene total; Collection lists your own creations (no purchase ownership model yet); key rotation makes old messages unreadable (no ratchet / forward secrecy); multiple devices per account = last device's key wins.
 
 ## 8. Environment gotchas
 
@@ -304,7 +407,13 @@ Smaller gaps: no push notifications for follows/hypes/comments (activity is pull
 
 ## 9. Changelog (newest first)
 
-- **2026-09-27 (stage 6) — uncommitted, AR module only:** social network layer (§4.8). Shared engagement/follow/inbox/activity stores; comments (UI + `2026_ar_social.sql`); redesigned feed card with double-tap hype; creator row + follow on the detail sheet; Explore Following filter, creator suggestions, skeletons and badged Activity/Messages; Activity screen; rebuilt Messages inbox with unread state; centre Create tab; profile cover/share/edit; AR Edit Profile; Search Creators rail; `locolo://user/<id>` deep links.
+- **2026-09-27 (stage 8) — committed:** committed stage 7 (notifications) so it isn't lost; captured the 5 prod-live RPCs (`get_nearby_assets_full`, `get_asset_full`, `get_recommended_assets`, `get_follow_counts`, `toggle_asset_hype`) into `docs/migrations/2026_prod_rpcs_dump.sql` (they existed only in prod). Full build green. `get_comment_counts` intentionally excluded (ships with the unapplied social migration).
+- **2026-09-27 (stage 7) — committed:** notifications (§4.9).
+  - Server: `notifications` table fed by triggers for follows, hypes, comments, @mentions, offers and offer answers, new drops to followers, discoveries, hype/explorer milestones, and messages (`notify_message`). Plus notification preferences, APNs device tokens, cross-device chat read state (`conversation_reads`), and the `app_config.push_enabled` flag (`2026_ar_notifications.sql`). New `send-push` edge function (direct APNs with an ES256 JWT, prefs, badge, thread and collapse ids, stale-token cleanup).
+  - Client: the Activity screen reads the server feed with cross-device read state and swipe to clear, and shows the new kinds. Local-notification fallbacks run until push is live. Notification taps route through `DeepLinkRouter` (new chat, activity, messages and viewer links). The chat you're reading shows no banner. App badge sync.
+  - Nearby AR art alert within 100 m: exact distance, direction, name, creator, place, thumbnail, View in AR action, hysteresis, cooldowns, and geofences for a killed app.
+  - Settings: notification toggles and a permission prompt. The token is unregistered on sign-out.
+- **2026-09-27 (stage 6) — `9f73f48`, AR module only:** social network layer (§4.8). Shared engagement/follow/inbox/activity stores; comments (UI + `2026_ar_social.sql`); redesigned feed card with double-tap hype; creator row + follow on the detail sheet; Explore Following filter, creator suggestions, skeletons and badged Activity/Messages; Activity screen; rebuilt Messages inbox with unread state; centre Create tab; profile cover/share/edit; AR Edit Profile; Search Creators rail; `locolo://user/<id>` deep links.
 
 - **2026-09-27 (stage 5b) — `0393ca9`, pushed to `github/fresh-start`:** audit follow-ups. Chat via `ARChatScreen` on the dashboard stack; visibility filters + server-side visibility RLS; Keychain-safe identity key; notification-extension ciphertext guard; Firebase session follows Supabase login; robust logout; `view_count` trigger; profile placement map; Geo ⇄ GPS toggle; GPS-mode re-anchoring; hype in-flight guard; follow-list error + Retry; removed no-op post toggle; removed `AppDelegate` plaintext reply path.
 - **2026-09-27 (stage 5) — in `0393ca9`:** verification pass against code + prod. Fixed viewer lifecycle, radians/degrees, media cache, hand-draw export pipeline, feed refresh, chat plaintext fallback/quick-reply/listener leak, offers, wishlist, deep-link cold launch, `.create` owner fallback, Info.plist. Added report/block/settings/delete account, snapshots, hot/cold finder, Explorer Passport, email-private data layer, hardened edge functions, safety & hardening migration.

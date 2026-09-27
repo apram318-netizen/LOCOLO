@@ -27,8 +27,24 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             print(" Relaunched by iOS due to significant location change")
             _ = LocationManager.shared
         }
+
+        // Owns the nearby-art geofences; must exist at launch so a
+        // region-entry relaunch is delivered to its delegate.
+        _ = ProximityNotifier.shared
         
         return true
+    }
+
+    // MARK: Remote notifications (APNs)
+
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        PushRegistry.didRegister(deviceToken: deviceToken)
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        PushRegistry.didFailToRegister(error)
     }
     
     

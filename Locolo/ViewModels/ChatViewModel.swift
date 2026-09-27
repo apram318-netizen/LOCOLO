@@ -24,6 +24,7 @@ class ChatViewModel: ObservableObject {
     private var conversationId: String            // Firestore document ID for the chat
     private var userId: String
     private let peerId: UUID?                      // explicit peer, else derived from the conversation
+    private var resolvedPeer: UUID?                // who receives our sends (for push)
     private var conversationKey: SymmetricKey?     // nil until the peer key resolves
     private var rawMessages: [Message] = []        // ciphertext as received
     private var listenerTask: Task<Void, Never>?
@@ -49,6 +50,7 @@ class ChatViewModel: ObservableObject {
                 .first { $0.lowercased() != userId.lowercased() }
                 .flatMap { UUID(uuidString: $0) }
         }
+        resolvedPeer = peer
         guard let peer, let peerKey = await KeyDirectory.shared.publicKey(for: peer) else { return }
 
         // Safety-number check: warn if the peer's key differs from the one we
@@ -142,6 +144,8 @@ class ChatViewModel: ObservableObject {
         do {
             try await repo.sendMessage(conversationId: conversationId, message: msg,
                                        lastMessagePreview: "🔒 Encrypted message")
+            // Asks the server to push "New message from <me>" — never the body.
+            ARPushEvents.messageSent(conversationId: conversationId, recipient: resolvedPeer ?? peerId)
             return true
         } catch {
             sendError = "Message didn't send. Check your connection and try again."

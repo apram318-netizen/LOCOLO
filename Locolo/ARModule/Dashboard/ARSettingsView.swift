@@ -10,11 +10,15 @@
 
 import SwiftUI
 import Supabase
+import UserNotifications
 
 struct ARSettingsView: View {
     @EnvironmentObject private var userVM: UserViewModel
     @ObservedObject private var safety = SafetyService.shared
+    @ObservedObject private var notificationPrefs = NotificationPreferences.shared
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var notificationStatus: UNAuthorizationStatus = .authorized
 
     @State private var email: String?
     @State private var blockedUsers: [User] = []
@@ -30,6 +34,7 @@ struct ARSettingsView: View {
     var body: some View {
         List {
             accountSection
+            notificationsSection
             safetySection
             privacySection
             appSection
@@ -43,6 +48,9 @@ struct ARSettingsView: View {
         .toolbar(.visible, for: .navigationBar)
         .task { await load() }
         .onChange(of: safety.blockedUserIds) { Task { await loadBlockedUsers() } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await refreshNotificationStatus() } }
+        }
         .fullScreenCover(isPresented: $showOnboarding) {
             AROnboardingView { showOnboarding = false }
         }
@@ -97,6 +105,51 @@ struct ARSettingsView: View {
         } header: {
             Text("Account")
         }
+    }
+
+    private var notificationsSection: some View {
+        Section {
+            if notificationStatus == .denied {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Notifications are off for Locolo", systemImage: "bell.slash.fill")
+                        .foregroundColor(.orange)
+                    Text("Turn them on in Settings to hear about new followers, comments, messages and AR art near you.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                        Link("Open Settings", destination: settingsURL)
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                .padding(.vertical, 4)
+            } else if notificationStatus == .notDetermined {
+                Button {
+                    Task { await requestNotifications() }
+                } label: {
+                    Label("Turn on notifications", systemImage: "bell.badge")
+                }
+            }
+            prefToggle("New followers", icon: "person.badge.plus", isOn: $notificationPrefs.prefs.follows)
+            prefToggle("Hypes", icon: "bolt", isOn: $notificationPrefs.prefs.hypes)
+            prefToggle("Comments", icon: "bubble.right", isOn: $notificationPrefs.prefs.comments)
+            prefToggle("Mentions", icon: "at", isOn: $notificationPrefs.prefs.mentions)
+            prefToggle("Messages", icon: "paperplane", isOn: $notificationPrefs.prefs.messages)
+            prefToggle("Offers", icon: "tag", isOn: $notificationPrefs.prefs.offers)
+            prefToggle("New from people you follow", icon: "sparkles", isOn: $notificationPrefs.prefs.newPosts)
+            prefToggle("Discoveries & milestones", icon: "trophy", isOn: $notificationPrefs.prefs.milestones)
+            prefToggle("AR art nearby", icon: "location.viewfinder", isOn: $notificationPrefs.prefs.nearby)
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text("“AR art nearby” lets you know when you walk within 100 m of someone's creation, with its name and exact distance — at most one alert every few minutes. Set location access to “Always” to get it while Locolo is closed.")
+        }
+    }
+
+    private func prefToggle(_ title: String, icon: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            Label(title, systemImage: icon)
+        }
+        .tint(.purple)
     }
 
     private var safetySection: some View {
@@ -220,7 +273,19 @@ struct ARSettingsView: View {
     private func load() async {
         email = try? await SupabaseManager.shared.client.auth.session.user.email
         cacheBytes = MediaCache.shared.diskUsage()
+        await refreshNotificationStatus()
         await loadBlockedUsers()
+    }
+
+    private func refreshNotificationStatus() async {
+        notificationStatus = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+
+    private func requestNotifications() async {
+        let granted = (try? await UNUserNotificationCenter.current()
+            .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        if granted { UIApplication.shared.registerForRemoteNotifications() }
+        await refreshNotificationStatus()
     }
 
     private func loadBlockedUsers() async {
@@ -242,6 +307,7 @@ struct ARSettingsView: View {
     private func signOut() async {
         isWorking = true
         defer { isWorking = false }
+        await PushRegistry.shared.unregister()
         safety.resetForSignOut()
         await userVM.logout()
         if let message = userVM.errorMessage, userVM.isAuthenticated {

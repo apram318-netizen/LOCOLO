@@ -216,10 +216,12 @@ struct ARDisplayView: View {
         .onAppear {
             vm.resetARState()
             vm.startLocationUpdates()
+            ProximityNotifier.shared.isViewerActive = true
         }
         // Release the mic and motion sensors when leaving the AR session
         .onDisappear {
             vm.triggerEngine.teardown()
+            ProximityNotifier.shared.isViewerActive = false
         }
         .task { await vm.runFinderPulses() }
         .animation(.spring(response: 0.45, dampingFraction: 0.75), value: vm.justFound?.id)

@@ -2,12 +2,14 @@
 //  ARActivityView.swift
 //  Locolo
 //
-//  Notifications-style activity inbox: who followed you, hyped or commented
-//  on your creations, and offers you received. Grouped into New / Earlier;
-//  opening the screen marks everything seen when you leave it.
+//  Notifications-style activity inbox: follows, hypes, comments and mentions,
+//  offers (and answers to yours), new drops from people you follow,
+//  discoveries and milestones. Grouped into New / Earlier; opening the screen
+//  marks everything seen when you leave it.
 //
 
 import SwiftUI
+import UserNotifications
 
 struct ARActivityView: View {
     @EnvironmentObject private var dashboardState: ARDashboardState
@@ -36,8 +38,9 @@ struct ARActivityView: View {
 
         func matches(_ kind: SocialActivity.Kind) -> Bool {
             switch (self, kind) {
-            case (.all, _), (.follows, .follow), (.hypes, .hype),
-                 (.comments, .comment), (.offers, .offer):
+            case (.all, _), (.follows, .follow), (.hypes, .hype), (.hypes, .milestone),
+                 (.comments, .comment), (.comments, .mention),
+                 (.offers, .offer), (.offers, .offerUpdate):
                 return true
             default:
                 return false
@@ -92,7 +95,14 @@ struct ARActivityView: View {
         .toolbar(.visible, for: .navigationBar)
         .refreshable { await store.refresh() }
         .task { await store.refresh(force: false) }
-        .onDisappear { store.markAllSeen() }
+        .onAppear {
+            store.isViewing = true
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["activity-summary"])
+        }
+        .onDisappear {
+            store.isViewing = false
+            store.markAllSeen()
+        }
         .sheet(item: $selectedAsset) { asset in
             AssetDetailSheet(
                 asset: asset,
@@ -131,7 +141,7 @@ struct ARActivityView: View {
         ARInlineEmptyState(
             icon: filter == .all ? "bell.badge" : filter.icon,
             title: filter == .all ? "No activity yet" : "No \(filter.rawValue.lowercased()) yet",
-            subtitle: "When people follow you, hype, comment on or make offers for your creations, you'll see it here.",
+            subtitle: "When people follow you, hype, comment on, discover or make offers for your creations — or someone you follow drops something new — you'll see it here.",
             actionTitle: "Create something",
             action: { dashboardState.path.append(.create) }
         )
@@ -141,15 +151,30 @@ struct ARActivityView: View {
         ForEach(items) { item in
             ActivityRow(
                 item: item,
-                actor: creators.creator(item.actorId),
+                actor: item.actorId.flatMap { creators.creator($0) },
                 isNew: store.isNew(item),
                 isOpening: openingAssetId == item.asset?.id && item.asset != nil,
-                onOpenActor: { dashboardState.path.append(.profile(userId: item.actorId)) },
+                onOpenActor: {
+                    if let actor = item.actorId {
+                        dashboardState.path.append(.profile(userId: actor))
+                    } else {
+                        openAsset(item.asset)
+                    }
+                },
                 onOpenAsset: { openAsset(item.asset) }
             )
             .listRowBackground(store.isNew(item) ? Color.purple.opacity(0.07) : Color.clear)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                if store.source == .server {
+                    Button(role: .destructive) {
+                        withAnimation { store.remove(item) }
+                    } label: {
+                        Label("Clear", systemImage: "trash")
+                    }
+                }
+            }
         }
     }
 
@@ -180,11 +205,11 @@ private struct ActivityRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Button(action: onOpenActor) {
-                ARAvatarView(url: actor?.avatarUrl, name: name, size: 46)
+                avatar
                     .overlay(alignment: .bottomTrailing) { kindBadge }
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open \(name)'s profile")
+            .accessibilityLabel(item.actorId == nil ? "Open \(item.asset?.name ?? "creation")" : "Open \(name)'s profile")
 
             message
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -197,13 +222,35 @@ private struct ActivityRow: View {
         }
     }
 
+    /// Milestones have no actor, so they show a trophy tile instead of a face.
+    @ViewBuilder
+    private var avatar: some View {
+        if item.actorId == nil {
+            ZStack {
+                Circle().fill(AppColors.purplePinkGradient)
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            .frame(width: 46, height: 46)
+        } else {
+            ARAvatarView(url: actor?.avatarUrl, name: name, size: 46)
+        }
+    }
+
     private var kindBadge: some View {
         let (icon, colors): (String, [Color]) = {
             switch item.kind {
-            case .follow:  return ("person.fill.badge.plus", [.purple, .pink])
-            case .hype:    return ("bolt.fill", [.yellow, .orange])
-            case .comment: return ("bubble.right.fill", [.blue, .cyan])
-            case .offer:   return ("tag.fill", [.green, .mint])
+            case .follow:      return ("person.fill.badge.plus", [.purple, .pink])
+            case .hype:        return ("bolt.fill", [.yellow, .orange])
+            case .comment:     return ("bubble.right.fill", [.blue, .cyan])
+            case .mention:     return ("at", [.blue, .indigo])
+            case .offer:       return ("tag.fill", [.green, .mint])
+            case .offerUpdate(let accepted, _):
+                return accepted ? ("checkmark", [.green, .mint]) : ("xmark", [.gray, .secondary])
+            case .newPost:     return ("sparkles", [.pink, .purple])
+            case .discovery:   return ("location.north.fill", [.teal, .blue])
+            case .milestone:   return ("flame.fill", [.orange, .red])
             }
         }()
         return Image(systemName: icon)
@@ -217,9 +264,26 @@ private struct ActivityRow: View {
 
     private var message: some View {
         let assetName = item.asset?.name ?? "your creation"
-        var text = Text(name).bold()
+        var text = item.actorId == nil ? Text("") : Text(name).bold()
         if actor?.isVerified == true { text = text + Text(" \(Image(systemName: "checkmark.seal.fill"))").foregroundColor(.blue) }
         switch item.kind {
+        case .mention(let body):
+            text = text + Text(" mentioned you on ") + Text(item.asset?.name ?? "a creation").bold() + Text(": ")
+                + Text("“\(body)”").foregroundColor(.secondary)
+        case .offerUpdate(let accepted, let amount):
+            text = text + Text(accepted ? " accepted your " : " declined your ")
+            if let amount { text = text + Text(amount, format: .currency(code: "USD")).bold() + Text(" ") }
+            text = text + Text("offer for ") + Text(item.asset?.name ?? "a creation").bold()
+                + Text(accepted ? ". 🎉" : ".")
+        case .newPost:
+            text = text + Text(" dropped a new creation: ") + Text(item.asset?.name ?? "Untitled").bold()
+                + Text(". Go find it in AR.")
+        case .discovery:
+            text = text + Text(" discovered ") + Text(assetName).bold() + Text(" in AR.")
+        case .milestone(let metric, let count):
+            text = metric == "views"
+                ? Text("\(count.compactFormatted) explorers").bold() + Text(" have found ") + Text(assetName).bold() + Text(" 👀")
+                : Text(assetName).bold() + Text(" just hit ") + Text("\(count.compactFormatted) hypes").bold() + Text(" 🔥")
         case .follow:
             text = text + Text(" started following you.")
         case .hype:
@@ -244,10 +308,9 @@ private struct ActivityRow: View {
 
     @ViewBuilder
     private var trailing: some View {
-        switch item.kind {
-        case .follow:
-            ARFollowButton(userId: item.actorId, style: .compact, followTitle: "Follow back")
-        default:
+        if case .follow = item.kind, let actorId = item.actorId {
+            ARFollowButton(userId: actorId, style: .compact, followTitle: "Follow back")
+        } else {
             Button(action: onOpenAsset) {
                 ZStack {
                     AsyncImage(url: item.asset?.thumbUrl.flatMap(URL.init(string:))) { image in
