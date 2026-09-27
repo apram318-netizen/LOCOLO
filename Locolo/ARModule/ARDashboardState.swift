@@ -61,6 +61,8 @@ enum ARRoute: Hashable {
     case conversations                               // WS6 E2E messages inbox
     case settings                                    // account, safety, sign out
     case chat(conversationId: String)                // WS6 single conversation
+    case activity                                    // follows, hypes, comments, offers
+    case editProfile                                 // own profile editor
 }
 
 // MARK: - State

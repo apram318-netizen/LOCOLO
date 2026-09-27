@@ -28,8 +28,13 @@ struct ARCreatorDashboardView: View {
         )
     }
 
+    @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var activity = ActivityStore.shared
+
     @State private var selectedAsset: DigitalAsset?
     @State private var offersForAsset: DigitalAsset?
+    @State private var followerCount = 0
+    @State private var followingCount = 0
 
     var body: some View {
         ZStack {
@@ -45,16 +50,20 @@ struct ARCreatorDashboardView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             ARGlassHeader(title: "Creator Studio", subtitle: "Your AR presence", onExit: onDismiss) {
                 HStack(spacing: 8) {
+                    ARBadgedIconButton(icon: "bell", label: "Activity", badge: activity.unreadCount) {
+                        dashboardState.path.append(.activity)
+                    }
                     ARHeaderIconButton(icon: "gearshape", label: "Settings") {
                         dashboardState.path.append(.settings)
-                    }
-                    ARHeaderIconButton(icon: "plus", label: "Create AR asset", prominent: true) {
-                        dashboardState.path.append(.create)
                     }
                 }
             }
         }
-        .sheet(item: $selectedAsset) { AssetDetailSheet(asset: $0) }
+        .sheet(item: $selectedAsset) { asset in
+            AssetDetailSheet(asset: asset, onOpenProfile: { id in
+                if id != userVM.currentUser?.id { dashboardState.path.append(.profile(userId: id)) }
+            })
+        }
         .sheet(item: $offersForAsset) { asset in
             OfferListView(assetId: asset.id, ownerId: userVM.currentUser?.id)
         }
@@ -87,57 +96,147 @@ struct ARCreatorDashboardView: View {
             .padding(.top, 8)
             .padding(.bottom, 24)
         }
-        .refreshable { await vm.load(userId: user.id) }
-        .task { await vm.load(userId: user.id) }
+        .refreshable {
+            async let studio: Void = vm.load(userId: user.id)
+            async let counts: Void = loadFollowCounts(user.id)
+            _ = await (studio, counts)
+        }
+        .task {
+            async let studio: Void = vm.load(userId: user.id)
+            async let counts: Void = loadFollowCounts(user.id)
+            _ = await (studio, counts)
+        }
+        .onChange(of: followStore.following.count) { _, count in
+            if followStore.isLoaded { followingCount = count }
+        }
+    }
+
+    private func loadFollowCounts(_ id: UUID) async {
+        if let c = try? await FollowRepository().counts(for: id) {
+            followerCount = c.followers
+            followingCount = c.following
+        }
     }
 
     // MARK: - Header
 
     private func headerView(for user: User) -> some View {
-        HStack(alignment: .center, spacing: 16) {
-            AsyncImage(url: user.avatarUrl) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Color.gray.opacity(0.3)
+        VStack(alignment: .leading, spacing: 14) {
+            ZStack(alignment: .bottomLeading) {
+                Group {
+                    if let cover = user.coverUrl {
+                        AsyncImage(url: cover) { $0.resizable().scaledToFill() } placeholder: {
+                            AppColors.purplePinkGradient.opacity(0.6)
+                        }
+                    } else {
+                        AppColors.purplePinkGradient.opacity(0.6)
+                    }
+                }
+                .frame(height: 110)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                ARAvatarView(url: user.avatarUrl, name: user.name ?? user.username, size: 84)
+                    .padding(4)
+                    .background(Circle().fill(ARDesign.screenBackground))
+                    .overlay(Circle().strokeBorder(AppColors.purplePinkGradient, lineWidth: 2.5))
+                    .offset(x: 14, y: 44)
             }
-            .frame(width: 72, height: 72)
-            .clipShape(Circle())
-            .overlay(
-                Circle().strokeBorder(
-                    LinearGradient(colors: [.purple, .pink],
-                                   startPoint: .topLeading,
-                                   endPoint: .bottomTrailing),
-                    lineWidth: 2
-                )
-            )
+            .padding(.bottom, 40)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
                     Text(user.name ?? user.username)
                         .font(.title3.bold())
                         .lineLimit(1)
-                    if let verified = user.verifiedFlags?["blue"], verified {
-                        Image(systemName: "checkmark.seal.fill")
-                            .foregroundStyle(.blue)
-                            .accessibilityLabel("Verified")
+                    if user.verifiedFlags?["blue"] == true {
+                        ARVerifiedBadge(size: 15)
                     }
                 }
-
                 Text("@\(user.username)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-
                 if let bio = user.bio, !bio.isEmpty {
                     Text(bio)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .padding(.top, 4)
+                } else {
+                    Button { dashboardState.path.append(.editProfile) } label: {
+                        Label("Add a bio", systemImage: "plus")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppColors.purplePinkGradient)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
                 }
             }
 
-            Spacer()
+            HStack(spacing: 0) {
+                profileStat(vm.ownAssets.count, "Creations") {
+                    dashboardState.path.append(.profile(userId: user.id))
+                }
+                profileStat(followerCount, "Followers") {
+                    dashboardState.path.append(.followList(userId: user.id, followers: true))
+                }
+                profileStat(followingCount, "Following") {
+                    dashboardState.path.append(.followList(userId: user.id, followers: false))
+                }
+            }
+            .padding(.vertical, 12)
+            .arGlassCard(cornerRadius: 18)
+
+            HStack(spacing: 10) {
+                Button { dashboardState.path.append(.editProfile) } label: {
+                    Text("Edit profile")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(Capsule().fill(ARDesign.headerButtonCircle))
+                }
+                .buttonStyle(.plain)
+
+                ShareLink(item: DeepLinkRouter.userURL(for: user.id),
+                          subject: Text(user.name ?? user.username),
+                          message: Text("Check out my AR creations on Locolo")) {
+                    Text("Share profile")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(Capsule().fill(ARDesign.headerButtonCircle))
+                }
+
+                Button { dashboardState.path.append(.profile(userId: user.id)) } label: {
+                    Image(systemName: "eye")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.primary)
+                        .frame(width: 42, height: 42)
+                        .background(Circle().fill(ARDesign.headerButtonCircle))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("View public profile")
+            }
         }
         .padding(.horizontal, 16)
+    }
+
+    private func profileStat(_ value: Int, _ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Text(value.compactFormatted)
+                    .font(.headline.bold())
+                    .foregroundColor(.primary)
+                    .contentTransition(.numericText())
+                Text(label)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(value) \(label)")
     }
 
     // MARK: - Overview

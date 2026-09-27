@@ -18,9 +18,10 @@ struct CreatorProfileView: View {
     @Environment(\.dismiss) private var dismiss
 
     @ObservedObject private var safety = SafetyService.shared
+    @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var engagement = EngagementStore.shared
 
     @State private var selectedAsset: DigitalAsset?
-    @State private var activeChat: ActiveChat?
     @State private var isOpeningChat = false
     @State private var showReport = false
     @State private var confirmBlock = false
@@ -43,11 +44,6 @@ struct CreatorProfileView: View {
     private var visiblePins: [AssetPlacementPin] {
         let ids = Set(visibleAssets.map(\.id))
         return vm.pins.filter { ids.contains($0.id) }
-    }
-
-    /// Identifiable wrapper so the chat sheet can be driven by .sheet(item:).
-    private struct ActiveChat: Identifiable {
-        let id: String   // conversation id
     }
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
@@ -110,7 +106,15 @@ struct CreatorProfileView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await vm.load() }
-        .sheet(item: $selectedAsset) { AssetDetailSheet(asset: $0) }
+        .task(id: vm.assets.map(\.id)) { await engagement.prime(vm.assets) }
+        .onChange(of: followStore.following.contains(userId)) { _, now in
+            vm.syncFollow(now)
+        }
+        .sheet(item: $selectedAsset) { asset in
+            AssetDetailSheet(asset: asset, onOpenProfile: { id in
+                if id != userId { dashboardState.path.append(.profile(userId: id)) }
+            })
+        }
         .sheet(isPresented: $showReport) {
             ReportSheet(assetId: nil, userId: userId,
                         subjectName: vm.creator?.displayName ?? "this creator")
@@ -120,18 +124,6 @@ struct CreatorProfileView: View {
             Button("Block", role: .destructive) { setBlocked(true) }
         } message: {
             Text("You won't see their assets anywhere in Locolo. You can unblock them any time.")
-        }
-        .sheet(item: $activeChat) { chat in
-            // E2E chat with this creator (WS6). peerId passed explicitly so the
-            // key derives immediately without a participants fetch.
-            if let me = userVM.currentUser {
-                NavigationStack {
-                    ARChatScreen(conversationId: chat.id, peerId: userId,
-                                 title: vm.creator?.displayName ?? "Chat",
-                                 currentUserId: me.id.uuidString,
-                                 currentUserName: me.name ?? me.username)
-                }
-            }
         }
     }
 
@@ -208,22 +200,13 @@ struct CreatorProfileView: View {
 
     /// Find-or-create the 1:1 conversation with this creator, then open chat.
     private func startConversation() {
-        guard let me = userVM.currentUser, !isOpeningChat else { return }
+        guard userVM.currentUser != nil, !isOpeningChat else { return }
         isOpeningChat = true
-        let myId = me.id.uuidString.lowercased()
-        let peer = userId.uuidString.lowercased()
         Task {
             defer { isOpeningChat = false }
-            let repo = ChatRepository()
-            do {
-                let convoId: String
-                if let existing = try await repo.findExistingConversation(between: myId, and: peer) {
-                    convoId = existing
-                } else {
-                    convoId = try await repo.createConversation(between: [myId, peer])
-                }
-                activeChat = ActiveChat(id: convoId)
-            } catch {
+            if let convoId = await InboxStore.shared.conversationId(with: userId) {
+                dashboardState.path.append(.chat(conversationId: convoId))
+            } else {
                 vm.errorMessage = "Couldn't open the conversation. Try again."
             }
         }
@@ -233,28 +216,47 @@ struct CreatorProfileView: View {
 
     private func header(scrollToAssets: @escaping () -> Void) -> some View {
         VStack(spacing: 14) {
-            AsyncImage(url: vm.user?.avatarUrl) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                ZStack {
-                    Circle().fill(AppColors.purplePinkGradient.opacity(0.25))
-                    Image(systemName: "person.fill")
-                        .font(.title)
-                        .foregroundColor(.purple)
+            ZStack(alignment: .bottom) {
+                Group {
+                    if let cover = vm.user?.coverUrl {
+                        AsyncImage(url: cover) { $0.resizable().scaledToFill() } placeholder: {
+                            AppColors.purplePinkGradient.opacity(0.6)
+                        }
+                    } else {
+                        AppColors.purplePinkGradient.opacity(0.6)
+                    }
                 }
-            }
-            .frame(width: 96, height: 96)
-            .clipShape(Circle())
-            .overlay(Circle().strokeBorder(ARDesign.hairline, lineWidth: 1))
+                .frame(height: 120)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
 
-            HStack(spacing: 6) {
-                Text(vm.creator?.displayName ?? "AR Creator")
-                    .font(.title2.bold())
-                    .foregroundColor(.primary)
-                if vm.creator?.isVerified == true {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.blue)
-                        .accessibilityLabel("Verified creator")
+                ARAvatarView(url: vm.user?.avatarUrl, name: vm.creator?.displayName ?? "?", size: 96)
+                    .padding(4)
+                    .background(Circle().fill(ARDesign.screenBackground))
+                    .overlay(Circle().strokeBorder(AppColors.purplePinkGradient, lineWidth: 2.5))
+                    .offset(y: 50)
+            }
+            .padding(.bottom, 50)
+
+            VStack(spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(vm.creator?.displayName ?? "AR Creator")
+                        .font(.title2.bold())
+                        .foregroundColor(.primary)
+                    if vm.creator?.isVerified == true {
+                        ARVerifiedBadge(size: 16)
+                    }
+                }
+                if let handle = vm.user?.username {
+                    Text("@\(handle)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                if let joined = vm.user?.joinedAt {
+                    Label("Joined \(joined.formatted(.dateTime.month(.wide).year()))", systemImage: "calendar")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
                 }
             }
 
@@ -294,7 +296,8 @@ struct CreatorProfileView: View {
     private func statPill(count: Int, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 3) {
-                Text("\(count)").font(.title3.bold()).foregroundColor(.primary)
+                Text(count.compactFormatted).font(.title3.bold()).foregroundColor(.primary)
+                    .contentTransition(.numericText())
                 Text(label).font(.caption).foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity)
@@ -342,15 +345,36 @@ struct CreatorProfileView: View {
                 }
                 .disabled(isOpeningChat)
                 .accessibilityLabel("Message")
+
+                shareProfileButton
             } else if vm.isSelf {
-                Text("This is you")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Capsule().fill(.ultraThinMaterial))
+                Button { dashboardState.path.append(.editProfile) } label: {
+                    Text("Edit profile")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Capsule().fill(.ultraThinMaterial))
+                        .overlay(Capsule().strokeBorder(ARDesign.hairline, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
+                shareProfileButton
             }
         }
+    }
+
+    private var shareProfileButton: some View {
+        ShareLink(item: DeepLinkRouter.userURL(for: userId),
+                  subject: Text(vm.creator?.displayName ?? "Locolo creator"),
+                  message: Text("Check out \(vm.creator?.displayName ?? "this creator")'s AR creations on Locolo")) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.primary)
+                .frame(width: 46, height: 46)
+                .background(Circle().fill(ARDesign.headerButtonCircle))
+        }
+        .accessibilityLabel("Share profile")
     }
 
     // MARK: - Placement map
@@ -409,10 +433,16 @@ struct CreatorProfileView: View {
                                 .frame(maxWidth: .infinity)
                                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                                 .overlay(alignment: .bottomLeading) {
-                                    Text(asset.name ?? "Untitled")
+                                    HStack(spacing: 4) {
+                                        Text(asset.name ?? "Untitled")
+                                            .lineLimit(1)
+                                        Spacer(minLength: 4)
+                                        Image(systemName: "bolt.fill")
+                                            .foregroundColor(.yellow)
+                                        Text(engagement.hypeCount(for: asset).compactFormatted)
+                                    }
                                         .font(.caption.weight(.semibold))
                                         .foregroundColor(.white)
-                                        .lineLimit(1)
                                         .padding(8)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .background(

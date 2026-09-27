@@ -30,6 +30,8 @@ struct ARAppRootView: View {
                 openPendingDeepLink()
                 await onSignedIn()
             }
+            // This view only exists while signed in, so leaving it is sign-out.
+            .onDisappear { SocialSession.end() }
             .sheet(item: $deepLinkAsset) { asset in
                 AssetDetailSheet(asset: asset)
             }
@@ -50,7 +52,9 @@ struct ARAppRootView: View {
     private func onSignedIn() async {
         guard let user = userVM.currentUser else { return }
         UserDefaults.standard.set(user.name ?? user.username, forKey: Self.displayNameDefaultsKey)
+        async let social: Void = SocialSession.start(me: user.id)
         await KeyDirectory.shared.publishMyKey(userId: user.id)
         await SafetyService.shared.syncBlocks(for: user.id)
+        await social
     }
 }

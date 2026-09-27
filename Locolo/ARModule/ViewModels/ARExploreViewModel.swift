@@ -21,6 +21,7 @@ final class ARExploreViewModel: ObservableObject {
 
     enum FeedFilter: String, CaseIterable, Identifiable {
         case forYou = "For You"
+        case following = "Following"
         case trending = "Trending"
         case nearby = "Nearby"
 
@@ -29,10 +30,19 @@ final class ARExploreViewModel: ObservableObject {
         var icon: String {
             switch self {
             case .forYou: return "wand.and.stars"
+            case .following: return "person.2"
             case .trending: return "flame"
             case .nearby: return "location"
             }
         }
+    }
+
+    struct SuggestedCreator: Identifiable {
+        let creator: ARCreator
+        let assetCount: Int
+        let totalHype: Int
+        let preview: DigitalAsset?
+        var id: UUID { creator.id }
     }
 
     @Published var featuredAssets: [DigitalAsset] = []
@@ -56,12 +66,41 @@ final class ARExploreViewModel: ObservableObject {
 
     private let repo = DigitalAssetRepository()
     private let client = SupabaseManager.shared.client
-    private var safetyObserver: AnyCancellable?
+    private var observers: Set<AnyCancellable> = []
 
     init() {
-        // Blocking/reporting must drop content from the feed immediately.
-        safetyObserver = SafetyService.shared.objectWillChange
+        // Blocking/reporting must drop content from the feed immediately, and
+        // follow changes reshape the Following feed + suggestions.
+        SafetyService.shared.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &observers)
+        FollowStore.shared.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &observers)
+    }
+
+    private var myId: UUID? {
+        SupabaseManager.shared.currentUserId.flatMap(UUID.init(uuidString:))
+    }
+
+    /// Creators with visible work that the user doesn't follow yet, ranked by
+    /// total hype and output — the "Creators to follow" rail.
+    var suggestedCreators: [SuggestedCreator] {
+        let following = FollowStore.shared.following
+        let me = myId
+        let grouped = Dictionary(grouping: SafetyService.shared.visible(allAssets), by: \.userId)
+        let list: [SuggestedCreator] = grouped.compactMap { uid, assets in
+            guard uid != me, !following.contains(uid), let creator = creators[uid] else { return nil }
+            return SuggestedCreator(
+                creator: creator,
+                assetCount: assets.count,
+                totalHype: assets.reduce(0) { $0 + $1.hypeCount },
+                preview: assets.max { $0.engagementScore < $1.engagementScore }
+            )
+        }
+        return Array(list
+            .sorted { ($0.totalHype + $0.assetCount * 3) > ($1.totalHype + $1.assetCount * 3) }
+            .prefix(10))
     }
 
     // MARK: Feed
@@ -81,6 +120,11 @@ final class ARExploreViewModel: ObservableObject {
             return recs.isEmpty
                 ? base.sorted { $0.createdAt > $1.createdAt }
                 : recs
+        case .following:
+            let following = FollowStore.shared.following
+            return base
+                .filter { following.contains($0.userId) }
+                .sorted { $0.createdAt > $1.createdAt }
         case .trending:
             return base.sorted { $0.engagementScore > $1.engagementScore }
         case .nearby:
@@ -221,6 +265,7 @@ final class ARExploreViewModel: ObservableObject {
             for row in rows {
                 creators[row.id] = row
             }
+            CreatorCache.shared.insert(rows)
         } catch {
             // Creator chips just stay hidden; the feed itself is unaffected.
             print("Explore creator fetch failed:", error.localizedDescription)

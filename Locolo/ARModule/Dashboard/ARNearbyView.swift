@@ -76,9 +76,11 @@ struct ARNearbyView: View {
         }
         .task { vm.requestLocation() }
         .sheet(item: $detailAsset) { asset in
-            AssetDetailSheet(asset: asset, onOpenCreator: {
-                dashboardState.path.append(.profile(userId: asset.userId))
-            })
+            AssetDetailSheet(
+                asset: asset,
+                onOpenCreator: { dashboardState.path.append(.profile(userId: asset.userId)) },
+                onOpenProfile: { dashboardState.path.append(.profile(userId: $0)) }
+            )
         }
         .sheet(item: $streetViewAsset) { asset in
             ARStreetViewSheet(asset: asset)

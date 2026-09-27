@@ -17,10 +17,14 @@ struct AssetDetailSheet: View {
     /// Open the creator's public profile (WS4). The sheet can't push the nav
     /// stack itself, so the presenter passes a closure that dismisses + pushes.
     var onOpenCreator: (() -> Void)? = nil
+    /// Open any user's profile (comment authors). Same dismiss + push contract.
+    var onOpenProfile: ((UUID) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var userVM: UserViewModel
     @EnvironmentObject var wishlistVM: WishlistViewModel
+    @ObservedObject private var engagement = EngagementStore.shared
+    @ObservedObject private var creators = CreatorCache.shared
 
     // I just override the whole colour scheme.
     // I tried mixing light/dark earlier and it looked ugly + too bright.
@@ -34,11 +38,13 @@ struct AssetDetailSheet: View {
     @State private var isAboutExpanded: Bool = false
     @State private var resolvedLocationName: String = "Unknown"
     @State private var isWishlisted: Bool = false
-    @State private var isHyped: Bool = false
-    @State private var isTogglingHype = false
-    @State private var hypeCount: Int = 0
     @State private var showReport = false
     @State private var confirmBlock = false
+    @State private var showComments = false
+
+    private var isHyped: Bool { engagement.isHyped(asset.id) }
+    private var hypeCount: Int { engagement.hypeCount(for: asset) }
+    private var creator: ARCreator? { creators.creator(asset.userId) }
     
     var body: some View {
         NavigationStack {
@@ -107,16 +113,20 @@ struct AssetDetailSheet: View {
             } message: {
                 Text("You won't see their assets anywhere in Locolo. You can unblock them in Settings.")
             }
+            .sheet(isPresented: $showComments) {
+                CommentsSheet(asset: asset,
+                              onOpenProfile: onOpenProfile == nil && onOpenCreator == nil
+                                  ? nil : openProfileFromComments)
+            }
             .onAppear {
                 computeDistance()
                 reverseGeocodeAssetLocation()
-                hypeCount = asset.hypeCount
                 isWishlisted = wishlistVM.items.contains { $0.id == asset.id }
             }
             .task {
-                if let me = userVM.currentUser?.id {
-                    isHyped = await AssetEngagementRepository.shared.isHyped(userId: me, assetId: asset.id)
-                }
+                async let engagementPrime: Void = engagement.prime([asset])
+                async let creatorLoad: Void = creators.load([asset.userId])
+                _ = await (engagementPrime, creatorLoad)
             }
         }
     }
@@ -159,6 +169,7 @@ extension AssetDetailSheet {
                 VStack(alignment: .leading, spacing: 2) {
                     topRow
                     titleSection
+                    creatorRow
                     hypeOnlySection
                     aboutSection
                     priceSection
@@ -214,12 +225,12 @@ extension AssetDetailSheet {
                         Circle()
                             .fill(Color.white.opacity(0.09))
                             .frame(width: 30, height: 30)
-                        Image(systemName: isWishlisted ? "heart.fill" : "heart")
-                            .foregroundColor(isWishlisted ? .pink : .white)
+                        Image(systemName: isWishlisted ? "bookmark.fill" : "bookmark")
+                            .foregroundColor(isWishlisted ? .purple : .white)
                     }
                 }
                 .padding(.top, 4)
-                .accessibilityLabel(isWishlisted ? "Remove from wishlist" : "Save to wishlist")
+                .accessibilityLabel(isWishlisted ? "Remove from saved" : "Save")
             }
         }
     }
@@ -234,42 +245,110 @@ extension AssetDetailSheet {
     }
     
     
-    // MARK: - HYPE + CREATOR
+    // MARK: - CREATOR
+    private var creatorRow: some View {
+        HStack(spacing: 10) {
+            Button { openCreator() } label: {
+                HStack(spacing: 10) {
+                    ARAvatarView(url: creator?.avatarUrl, name: creator?.displayName ?? "?", size: 38)
+                        .padding(2)
+                        .overlay(Circle().strokeBorder(AppColors.purplePinkGradient, lineWidth: 1.5))
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 4) {
+                            Text(creator?.displayName ?? "Creator")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            if creator?.isVerified == true { ARVerifiedBadge(size: 12) }
+                        }
+                        if let handle = creator?.username {
+                            Text("@\(handle)")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.55))
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(onOpenCreator == nil && onOpenProfile == nil)
+            .accessibilityLabel("View \(creator?.displayName ?? "creator")'s profile")
+
+            Spacer()
+
+            ARFollowButton(userId: asset.userId, style: .compact)
+                .environment(\.colorScheme, .dark)
+        }
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - ENGAGEMENT
     private var hypeOnlySection: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             // Interactive hype toggle — persists via asset_hype + atomic RPC.
-            Button { toggleHype() } label: {
+            Button {
+                ARHaptics.tick()
+                Task { await engagement.toggleHype(asset) }
+            } label: {
                 HStack(spacing: 5) {
                     Image(systemName: isHyped ? "bolt.fill" : "bolt")
-                    Text("\(hypeCount)")
+                        .symbolEffect(.bounce, value: isHyped)
+                    Text(hypeCount.compactFormatted)
                         .font(.subheadline.weight(.semibold))
                         .contentTransition(.numericText())
                 }
-                .foregroundColor(isHyped ? .yellow : .white.opacity(0.75))
+                .foregroundColor(isHyped ? .yellow : .white.opacity(0.8))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(Capsule().fill(Color.white.opacity(isHyped ? 0.14 : 0.08)))
             }
-            .accessibilityLabel(isHyped ? "Remove hype" : "Hype this asset")
+            .accessibilityLabel(isHyped ? "Remove hype, \(hypeCount) hypes" : "Hype this asset, \(hypeCount) hypes")
 
-            if let onOpenCreator {
-                Button {
-                    dismiss()
-                    onOpenCreator()
-                } label: {
-                    Label("Creator", systemImage: "person.crop.circle")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(.white.opacity(0.85))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(Color.white.opacity(0.08)))
+            if engagement.commentsAvailable {
+                Button { showComments = true } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "bubble.right")
+                        Text(engagement.commentCount(for: asset.id).compactFormatted)
+                            .font(.subheadline.weight(.semibold))
+                            .contentTransition(.numericText())
+                    }
+                    .foregroundColor(.white.opacity(0.8))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
                 }
-                .accessibilityLabel("View creator profile")
+                .accessibilityLabel("Comments, \(engagement.commentCount(for: asset.id))")
+            }
+
+            if asset.viewCount > 0 {
+                HStack(spacing: 5) {
+                    Image(systemName: "eye")
+                    Text(asset.viewCount.compactFormatted)
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundColor(.white.opacity(0.55))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(asset.viewCount) explorers")
             }
 
             Spacer()
+
+            ShareLink(
+                item: DeepLinkRouter.assetURL(for: asset.id),
+                subject: Text(asset.name ?? "AR asset on Locolo"),
+                message: Text("Check out \"\(asset.name ?? "this AR asset")\" on Locolo")
+            ) {
+                Image(systemName: "paperplane")
+                    .foregroundColor(.white.opacity(0.85))
+                    .padding(8)
+                    .background(Circle().fill(Color.white.opacity(0.08)))
+            }
+            .accessibilityLabel("Share")
         }
-        .padding(.top, 6)
+        .padding(.bottom, 8)
     }
     
     
@@ -414,25 +493,22 @@ extension AssetDetailSheet {
         }
     }
 
-    private func toggleHype() {
-        // One toggle in flight at a time: overlapping RPCs can resolve out of
-        // order and leave the heart showing the opposite of the server state.
-        guard let me = userVM.currentUser?.id, !isTogglingHype else { return }
-        isTogglingHype = true
-        ARHaptics.tick()
-        // Optimistic flip; reconcile with the server's answer.
-        isHyped.toggle()
-        hypeCount += isHyped ? 1 : -1
-        Task {
-            defer { isTogglingHype = false }
-            if let state = await AssetEngagementRepository.shared.toggleHype(userId: me, assetId: asset.id) {
-                isHyped = state.hyped
-                hypeCount = state.hype_count
-            } else {
-                // Server failed — roll back.
-                isHyped.toggle()
-                hypeCount += isHyped ? 1 : -1
-            }
+    private func openCreator() {
+        if let onOpenCreator {
+            dismiss()
+            onOpenCreator()
+        } else if let onOpenProfile {
+            dismiss()
+            onOpenProfile(asset.userId)
+        }
+    }
+
+    private func openProfileFromComments(_ id: UUID) {
+        if let onOpenProfile {
+            dismiss()
+            onOpenProfile(id)
+        } else if id == asset.userId {
+            openCreator()
         }
     }
 

@@ -100,7 +100,9 @@ final class CreatorProfileViewModel: ObservableObject {
 
             if let me = meId, !isSelf {
                 isFollowing = (try? await follows.isFollowing(userId, from: me)) ?? false
+                FollowStore.shared.mark(userId, following: isFollowing)
             }
+            if let creator { CreatorCache.shared.insert([creator]) }
 
             // Map is a nice-to-have: a failure here shouldn't fail the profile.
             let pinRows: [AssetPinRow]? = try? await client
@@ -118,30 +120,30 @@ final class CreatorProfileViewModel: ObservableObject {
         isLoading = false
     }
 
-    /// Optimistic follow/unfollow with rollback on failure.
+    /// Optimistic follow/unfollow via FollowStore (so every Follow button in
+    /// the app flips together), with the follower count adjusted locally.
     func toggleFollow() async {
-        guard let me = meId, !isSelf, !isMutatingFollow else { return }
+        guard meId != nil, !isSelf, !isMutatingFollow else { return }
         isMutatingFollow = true
         defer { isMutatingFollow = false }
 
         let wasFollowing = isFollowing
-        // Optimistic UI
         isFollowing.toggle()
         followers += wasFollowing ? -1 : 1
         ARHaptics.tick()
 
-        do {
-            if wasFollowing {
-                try await follows.unfollow(userId, from: me)
-            } else {
-                try await follows.follow(userId, from: me)
-            }
-        } catch {
-            // Roll back
+        let nowFollowing = await FollowStore.shared.toggle(userId)
+        if nowFollowing == wasFollowing {
             isFollowing = wasFollowing
             followers += wasFollowing ? 1 : -1
             errorMessage = "Couldn't update follow. Try again."
-            print("toggleFollow failed:", error.localizedDescription)
         }
+    }
+
+    /// Keeps this profile in step when the follow is toggled elsewhere.
+    func syncFollow(_ nowFollowing: Bool) {
+        guard !isSelf, !isMutatingFollow, nowFollowing != isFollowing else { return }
+        isFollowing = nowFollowing
+        followers = max(0, followers + (nowFollowing ? 1 : -1))
     }
 }

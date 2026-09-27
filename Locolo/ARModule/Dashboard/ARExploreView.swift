@@ -14,8 +14,12 @@ struct ARExploreView: View {
 
     @StateObject private var vm = ARExploreViewModel()
     @EnvironmentObject private var dashboardState: ARDashboardState
+    @ObservedObject private var inbox = InboxStore.shared
+    @ObservedObject private var activity = ActivityStore.shared
+    @ObservedObject private var follows = FollowStore.shared
 
     @State private var selectedAsset: DigitalAsset?
+    @State private var commentsAsset: DigitalAsset?
     @State private var featuredPage = 0
 
     var body: some View {
@@ -38,41 +42,101 @@ struct ARExploreView: View {
                     } else {
                         VStack(spacing: 0) {
                             featuredSection
+                            suggestedCreatorsSection
                             feedSection
                         }
                         .padding(.bottom, 24)
                     }
                 }
-                .refreshable { await vm.refresh() }
+                .refreshable {
+                    async let feed: Void = vm.refresh()
+                    async let followsReload: Void = follows.reload()
+                    async let activityReload: Void = activity.refresh()
+                    _ = await (feed, followsReload, activityReload)
+                }
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             ARGlassHeader(title: "AR World", subtitle: "Shared Creative Space", onExit: onDismiss) {
                 HStack(spacing: 8) {
-                    ARHeaderIconButton(icon: "bubble.left.and.bubble.right", label: "Messages") {
-                        dashboardState.path.append(.conversations)
-                    }
                     ARHeaderIconButton(icon: "arkit", label: "Open AR viewer") {
                         dashboardState.path.append(.viewer)
                     }
-                    ARHeaderIconButton(icon: "plus", label: "Create AR asset", prominent: true) {
-                        dashboardState.path.append(.create)
+                    ARBadgedIconButton(icon: "bell", label: "Activity", badge: activity.unreadCount) {
+                        dashboardState.path.append(.activity)
+                    }
+                    ARBadgedIconButton(icon: "paperplane", label: "Messages", badge: inbox.unreadCount) {
+                        dashboardState.path.append(.conversations)
                     }
                 }
             }
         }
         .task { await vm.load() }
-        .sheet(item: $selectedAsset) { asset in
-            AssetDetailSheet(asset: asset, onOpenCreator: {
-                dashboardState.path.append(.profile(userId: asset.userId))
-            })
+        .task(id: vm.visibleFeed.map(\.id)) {
+            await EngagementStore.shared.prime(vm.visibleFeed)
         }
+        .sheet(item: $selectedAsset) { asset in
+            AssetDetailSheet(
+                asset: asset,
+                onOpenCreator: { dashboardState.path.append(.profile(userId: asset.userId)) },
+                onOpenProfile: { openProfile($0) }
+            )
+        }
+        .sheet(item: $commentsAsset) { asset in
+            CommentsSheet(asset: asset, onOpenProfile: { openProfile($0) })
+        }
+    }
+
+    private func openProfile(_ id: UUID) {
+        dashboardState.path.append(.profile(userId: id))
     }
 
     // MARK: - Loading
 
     private var loadingView: some View {
-        ARLoadingView(message: "Loading AR World…")
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                ARSkeletonBlock(height: 220, cornerRadius: 20)
+                    .arShimmer()
+                ForEach(0..<3, id: \.self) { _ in ARFeedCardSkeleton() }
+            }
+            .padding(16)
+        }
+        .scrollDisabled(true)
+        .accessibilityLabel("Loading AR World")
+    }
+
+    // MARK: - Suggested creators
+
+    @ViewBuilder
+    private var suggestedCreatorsSection: some View {
+        let suggestions = vm.suggestedCreators
+        if follows.isLoaded && !suggestions.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("Creators to follow", systemImage: "person.2.fill")
+                        .font(.headline.bold())
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 24)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(suggestions) { suggestion in
+                            SuggestedCreatorCard(suggestion: suggestion) {
+                                openProfile(suggestion.creator.id)
+                            }
+                            .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+                    .animation(ARDesign.spring, value: suggestions.map(\.id))
+                }
+            }
+        }
     }
 
     // MARK: - Featured
@@ -141,13 +205,25 @@ struct ARExploreView: View {
             feedFilterChips
 
             if vm.visibleFeed.isEmpty {
-                ARInlineEmptyState(
-                    icon: "sparkles",
-                    title: "No artworks yet",
-                    subtitle: "Be the first to place an AR creation in the world.",
-                    actionTitle: "Create one",
-                    action: { dashboardState.path.append(.create) }
-                )
+                if vm.feedFilter == .following {
+                    ARInlineEmptyState(
+                        icon: "person.2",
+                        title: follows.following.isEmpty ? "Follow creators you love" : "Nothing new from people you follow",
+                        subtitle: follows.following.isEmpty
+                            ? "Their newest AR creations will show up here."
+                            : "Check back soon, or discover someone new in For You.",
+                        actionTitle: "Discover creators",
+                        action: { withAnimation(ARDesign.spring) { vm.feedFilter = .forYou } }
+                    )
+                } else {
+                    ARInlineEmptyState(
+                        icon: "sparkles",
+                        title: "No artworks yet",
+                        subtitle: "Be the first to place an AR creation in the world.",
+                        actionTitle: "Create one",
+                        action: { dashboardState.path.append(.create) }
+                    )
+                }
             } else {
                 LazyVStack(spacing: 16) {
                     ForEach(vm.visibleFeed) { asset in
@@ -156,10 +232,11 @@ struct ARExploreView: View {
                             creator: vm.creator(for: asset),
                             isTrending: vm.isTrending(asset),
                             onOpenInAR: { dashboardState.path.append(.viewer) },
-                            onOpenCreator: { dashboardState.path.append(.profile(userId: asset.userId)) }
+                            onOpenCreator: { openProfile(asset.userId) },
+                            onOpen: { selectedAsset = asset },
+                            onOpenComments: { commentsAsset = asset }
                         )
                         .padding(.horizontal, 16)
-                        .onTapGesture { selectedAsset = asset }
                         .onAppear { vm.loadMoreIfNeeded(current: asset) }
                     }
 
@@ -215,12 +292,17 @@ struct ARFeaturedCard: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 5) {
-                    Image(systemName: "flame.fill")
+                    Image(systemName: "bolt.fill")
                         .font(.caption2)
-                        .foregroundColor(.orange)
-                    Text("\(asset.engagementScore) hype")
+                        .foregroundColor(.yellow)
+                    Text("\(asset.hypeCount.compactFormatted) hype")
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.white)
+                    if asset.viewCount > 0 {
+                        Text("· \(asset.viewCount.compactFormatted) explorers")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.75))
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -250,5 +332,67 @@ struct ARFeaturedCard: View {
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         )
         .shadow(color: Color.purple.opacity(0.3), radius: 20, x: 0, y: 8)
+    }
+}
+
+// MARK: - Suggested creator card
+
+struct SuggestedCreatorCard: View {
+    let suggestion: ARExploreViewModel.SuggestedCreator
+    let onOpen: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ZStack(alignment: .bottom) {
+                Group {
+                    if let preview = suggestion.preview {
+                        AssetThumbnailView(asset: preview, cornerRadius: 0)
+                    } else {
+                        AppColors.purplePinkGradient
+                    }
+                }
+                .frame(width: 156, height: 70)
+                .clipped()
+                .overlay(Color.black.opacity(0.15))
+
+                ARAvatarView(url: suggestion.creator.avatarUrl,
+                             name: suggestion.creator.displayName, size: 58)
+                    .padding(3)
+                    .background(Circle().fill(ARDesign.screenBackground))
+                    .overlay(Circle().strokeBorder(AppColors.purplePinkGradient, lineWidth: 2))
+                    .offset(y: 30)
+            }
+            .frame(width: 156, height: 70)
+            .padding(.bottom, 26)
+
+            VStack(spacing: 2) {
+                ARCreatorName(creator: suggestion.creator)
+                Text("@\(suggestion.creator.username)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Text("\(suggestion.assetCount) creation\(suggestion.assetCount == 1 ? "" : "s") · \(suggestion.totalHype.compactFormatted) hype")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .padding(.top, 2)
+            }
+            .padding(.horizontal, 8)
+
+            ARFollowButton(userId: suggestion.creator.id, style: .prominent)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+        }
+        .frame(width: 156)
+        .background(Color.adaptive(light: Color(.systemBackground),
+                                   dark: Color(red: 0.10, green: 0.07, blue: 0.18)))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(ARDesign.hairline, lineWidth: 1))
+        .shadow(color: AppColors.cardShadow, radius: 10, x: 0, y: 4)
+        .contentShape(RoundedRectangle(cornerRadius: 18))
+        .onTapGesture(perform: onOpen)
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: "Open profile", onOpen)
     }
 }

@@ -22,6 +22,8 @@ final class SafetyService: ObservableObject {
     @Published private(set) var blockedUserIds: Set<UUID> = []
     /// Assets this user reported — hidden from them immediately.
     @Published private(set) var hiddenAssetIds: Set<UUID> = []
+    /// Comments this user reported — hidden from them immediately.
+    @Published private(set) var hiddenCommentIds: Set<UUID> = []
 
     enum ReportReason: String, CaseIterable, Identifiable {
         case spam
@@ -65,10 +67,12 @@ final class SafetyService: ObservableObject {
     private let client = SupabaseManager.shared.client
     private let blockedKey = "ar_safety_blocked_user_ids"
     private let hiddenKey = "ar_safety_hidden_asset_ids"
+    private let hiddenCommentsKey = "ar_safety_hidden_comment_ids"
 
     private init() {
         blockedUserIds = Self.loadIds(blockedKey)
         hiddenAssetIds = Self.loadIds(hiddenKey)
+        hiddenCommentIds = Self.loadIds(hiddenCommentsKey)
     }
 
     // MARK: - Queries
@@ -83,6 +87,10 @@ final class SafetyService: ObservableObject {
     func visible(_ assets: [DigitalAsset]) -> [DigitalAsset] {
         guard !blockedUserIds.isEmpty || !hiddenAssetIds.isEmpty else { return assets }
         return assets.filter { !isHidden($0) }
+    }
+
+    func visible(_ comments: [AssetComment]) -> [AssetComment] {
+        comments.filter { !blockedUserIds.contains($0.userId) && !hiddenCommentIds.contains($0.id) }
     }
 
     // MARK: - Sync
@@ -179,6 +187,51 @@ final class SafetyService: ObservableObject {
         }
     }
 
+    private struct CommentReportRow: Encodable {
+        let reporter_id: UUID
+        let asset_id: UUID
+        let comment_id: UUID
+        let reported_user_id: UUID
+        let reason: String
+        let details: String?
+    }
+
+    /// Reports a comment and hides it for this user right away. Falls back to
+    /// an asset-level report (comment id in details) if the server predates
+    /// content_reports.comment_id.
+    @discardableResult
+    func reportComment(_ comment: AssetComment, reason: ReportReason,
+                       details: String?, reporter: UUID) async -> Bool {
+        hiddenCommentIds.insert(comment.id)
+        persist()
+        let trimmed = (details ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let note = trimmed.isEmpty ? nil : String(trimmed.prefix(1000))
+        do {
+            try await client
+                .from("content_reports")
+                .insert(CommentReportRow(
+                    reporter_id: reporter, asset_id: comment.assetId, comment_id: comment.id,
+                    reported_user_id: comment.userId, reason: reason.rawValue, details: note))
+                .execute()
+            return true
+        } catch {
+            do {
+                try await client
+                    .from("content_reports")
+                    .insert(ReportRow(
+                        reporter_id: reporter, asset_id: comment.assetId,
+                        reported_user_id: comment.userId, reason: reason.rawValue,
+                        details: "[comment \(comment.id.uuidString)] \(comment.body.prefix(300))"
+                            + (note.map { "\n\($0)" } ?? "")))
+                    .execute()
+                return true
+            } catch {
+                print("Comment report failed:", error.localizedDescription)
+                return false
+            }
+        }
+    }
+
     // MARK: - Account deletion
 
     /// Permanently deletes the signed-in account server-side (delete_my_account
@@ -187,6 +240,7 @@ final class SafetyService: ObservableObject {
         try await client.rpc("delete_my_account").execute()
         blockedUserIds = []
         hiddenAssetIds = []
+        hiddenCommentIds = []
         persist()
     }
 
@@ -195,6 +249,7 @@ final class SafetyService: ObservableObject {
     func resetForSignOut() {
         blockedUserIds = []
         hiddenAssetIds = []
+        hiddenCommentIds = []
     }
 
     // MARK: - Persistence
@@ -202,6 +257,7 @@ final class SafetyService: ObservableObject {
     private func persist() {
         UserDefaults.standard.set(blockedUserIds.map(\.uuidString), forKey: blockedKey)
         UserDefaults.standard.set(hiddenAssetIds.map(\.uuidString), forKey: hiddenKey)
+        UserDefaults.standard.set(hiddenCommentIds.map(\.uuidString), forKey: hiddenCommentsKey)
     }
 
     private static func loadIds(_ key: String) -> Set<UUID> {

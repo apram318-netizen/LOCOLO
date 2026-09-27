@@ -2,9 +2,10 @@
 //  ARSocialAssetCard.swift
 //  Locolo
 //
-//  The Explore feed's social card: creator row, media preview with
-//  badges, title/description, and an action row (hype, save to
-//  wishlist, share, open in AR). Replaces the old ARWorldFeedCard.
+//  The Explore feed's social card: creator row (with inline follow + overflow
+//  menu), media preview (double-tap to hype), an action row (hype, comment,
+//  share, save, open in AR) and the caption block. Hype and comment counts
+//  come from EngagementStore so every surface stays in sync.
 //
 
 import SwiftUI
@@ -17,11 +18,24 @@ struct ARSocialAssetCard: View {
     var onOpenInAR: (() -> Void)? = nil
     /// Open the creator's public profile (WS4).
     var onOpenCreator: (() -> Void)? = nil
+    /// Open the detail sheet (single tap on media or caption).
+    var onOpen: (() -> Void)? = nil
+    /// Open the comment thread.
+    var onOpenComments: (() -> Void)? = nil
 
     @EnvironmentObject var userVM: UserViewModel
     @EnvironmentObject var wishlistVM: WishlistViewModel
+    @ObservedObject private var engagement = EngagementStore.shared
+    @ObservedObject private var follows = FollowStore.shared
 
     @State private var isWishlisted = false
+    @State private var burst = false
+    @State private var showReport = false
+
+    private var isHyped: Bool { engagement.isHyped(asset.id) }
+    private var hypeCount: Int { engagement.hypeCount(for: asset) }
+    private var commentCount: Int { engagement.commentCount(for: asset.id) }
+    private var isMine: Bool { userVM.currentUser?.id == asset.userId }
 
     /// The viewer places assets around you, so only offer "Open in AR"
     /// within the same radius the detail sheet uses.
@@ -33,8 +47,9 @@ struct ARSocialAssetCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             creatorRow
-            thumbnailSection
-            contentSection
+            mediaSection
+            actionRow
+            captionSection
         }
         .background(Color.adaptive(
             light: Color(.systemBackground),
@@ -49,123 +64,235 @@ struct ARSocialAssetCard: View {
         .onAppear {
             isWishlisted = wishlistVM.items.contains { $0.id == asset.id }
         }
+        .sheet(isPresented: $showReport) {
+            ReportSheet(assetId: asset.id, userId: asset.userId,
+                        subjectName: asset.name ?? "this creation")
+        }
     }
 
     // MARK: - Creator row
 
     private var creatorRow: some View {
         HStack(spacing: 10) {
-            // Avatar + name open the creator's profile; the rest of the card
-            // opens the asset detail sheet. (WS4)
-            HStack(spacing: 10) {
-                AsyncImage(url: creator?.avatarUrl) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    ZStack {
-                        Circle().fill(Color.purple.opacity(0.2))
-                        Image(systemName: "person.fill")
-                            .font(.caption)
-                            .foregroundColor(.purple)
-                    }
-                }
-                .frame(width: 34, height: 34)
-                .clipShape(Circle())
+            Button { onOpenCreator?() } label: {
+                HStack(spacing: 10) {
+                    ARAvatarView(url: creator?.avatarUrl, name: creator?.displayName ?? "?", size: 36)
+                        .padding(2)
+                        .overlay(Circle().strokeBorder(AppColors.purplePinkGradient, lineWidth: 1.5))
 
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(creator?.displayName ?? "AR Creator")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(.primary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        ARCreatorName(creator: creator, fallback: "AR Creator")
+                        Text(subtitleLine)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
                             .lineLimit(1)
-                        if creator?.isVerified == true {
-                            Image(systemName: "checkmark.seal.fill")
-                                .font(.caption)
-                                .foregroundStyle(.blue)
-                                .accessibilityLabel("Verified creator")
-                        }
                     }
-                    Text(asset.createdAt.formatted(.relative(presentation: .named)))
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
                 }
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
-            .onTapGesture { onOpenCreator?() }
-            .accessibilityAddTraits(onOpenCreator == nil ? [] : .isButton)
+            .buttonStyle(.plain)
             .accessibilityLabel("View \(creator?.displayName ?? "creator")'s profile")
 
-            Spacer()
+            Spacer(minLength: 6)
 
             if isTrending {
-                HStack(spacing: 4) {
-                    Image(systemName: "flame.fill")
-                        .font(.caption2)
-                    Text("Trending")
-                        .font(.caption2.weight(.bold))
+                HStack(spacing: 3) {
+                    Image(systemName: "flame.fill").font(.caption2)
+                    Text("Trending").font(.caption2.weight(.bold))
                 }
                 .foregroundColor(.white)
-                .padding(.horizontal, 9)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Capsule().fill(AppColors.trendingBadge))
                 .accessibilityLabel("Trending asset")
             }
+
+            if !isMine && follows.isLoaded && !follows.isFollowing(asset.userId) {
+                ARFollowButton(userId: asset.userId, style: .compact)
+            }
+
+            overflowMenu
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
-    // MARK: - Thumbnail
-
-    private var thumbnailSection: some View {
-        ZStack(alignment: .bottom) {
-            AssetThumbnailView(asset: asset, cornerRadius: 0)
-                .aspectRatio(16 / 9, contentMode: .fit)
-
-            LinearGradient(
-                colors: [.clear, Color.black.opacity(0.75)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-
-            HStack(spacing: 8) {
-                HStack(spacing: 5) {
-                    Image(systemName: "location.fill")
-                        .font(.caption2)
-                    Text(locationLabel)
-                        .font(.caption)
-                        .lineLimit(1)
-                }
-                .foregroundColor(.white.opacity(0.9))
-
-                Spacer()
-
-                if let dist = asset.distanceLabel {
-                    Text(dist)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.black.opacity(0.45)))
-                }
-
-                if let cat = asset.categoryLabel {
-                    Text(cat)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.purple.opacity(0.6)))
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 10)
-        }
+    private var subtitleLine: String {
+        var parts = [asset.createdAt.shortRelative]
+        if let loc = asset.locationName ?? asset.displayLocation, !loc.isEmpty { parts.append(loc) }
+        return parts.joined(separator: " · ")
     }
 
-    // MARK: - Content + actions
+    private var overflowMenu: some View {
+        Menu {
+            ShareLink(item: DeepLinkRouter.assetURL(for: asset.id),
+                      subject: Text(asset.name ?? "AR creation"),
+                      message: Text("Check out \(asset.name ?? "this AR creation") on Locolo")) {
+                Label("Share…", systemImage: "square.and.arrow.up")
+            }
+            Button {
+                UIPasteboard.general.url = DeepLinkRouter.assetURL(for: asset.id)
+                ARHaptics.success()
+            } label: {
+                Label("Copy link", systemImage: "link")
+            }
+            if onOpenCreator != nil {
+                Button { onOpenCreator?() } label: {
+                    Label("View creator", systemImage: "person.crop.circle")
+                }
+            }
+            if !isMine {
+                Divider()
+                Button(role: .destructive) { showReport = true } label: {
+                    Label("Report", systemImage: "flag")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.subheadline.weight(.bold))
+                .foregroundColor(.secondary)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("More options")
+    }
 
-    private var contentSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    // MARK: - Media
+
+    private var mediaSection: some View {
+        ZStack(alignment: .bottom) {
+            AssetThumbnailView(asset: asset, cornerRadius: 0)
+                .aspectRatio(4 / 3, contentMode: .fit)
+
+            LinearGradient(colors: [.clear, Color.black.opacity(0.55)],
+                           startPoint: .center, endPoint: .bottom)
+                .allowsHitTesting(false)
+
+            HStack(spacing: 6) {
+                if let dist = asset.distanceLabel {
+                    mediaPill(icon: "location.fill", text: dist, fill: Color.black.opacity(0.45))
+                }
+                Spacer()
+                if let cat = asset.categoryLabel {
+                    mediaPill(icon: nil, text: cat, fill: Color.purple.opacity(0.65))
+                }
+            }
+            .padding(12)
+            .allowsHitTesting(false)
+
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 86, weight: .black))
+                .foregroundStyle(LinearGradient(colors: [.yellow, .orange, .pink],
+                                                startPoint: .top, endPoint: .bottom))
+                .shadow(color: .black.opacity(0.35), radius: 12)
+                .scaleEffect(burst ? 1.0 : 0.3)
+                .opacity(burst ? 1 : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { doubleTapHype() }
+        .onTapGesture { onOpen?() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(asset.name ?? "AR creation")
+        .accessibilityHint("Double tap to open. Use actions to hype.")
+        .accessibilityAction(named: "Hype") { Task { await engagement.toggleHype(asset) } }
+    }
+
+    private func mediaPill(icon: String?, text: String, fill: Color) -> some View {
+        HStack(spacing: 4) {
+            if let icon { Image(systemName: icon).font(.system(size: 9, weight: .bold)) }
+            Text(text).font(.caption2.weight(.semibold))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(fill))
+    }
+
+    // MARK: - Actions
+
+    private var actionRow: some View {
+        HStack(spacing: 16) {
+            Button {
+                ARHaptics.tick()
+                Task { await engagement.toggleHype(asset) }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: isHyped ? "bolt.fill" : "bolt")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(isHyped
+                                         ? AnyShapeStyle(LinearGradient(colors: [.yellow, .orange],
+                                                                        startPoint: .top, endPoint: .bottom))
+                                         : AnyShapeStyle(Color.primary))
+                        .symbolEffect(.bounce, value: isHyped)
+                    Text(hypeCount.compactFormatted)
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundColor(.primary)
+                        .contentTransition(.numericText())
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isHyped ? "Hyped, \(hypeCount) hypes. Double tap to remove" : "Hype, \(hypeCount) hypes")
+
+            if engagement.commentsAvailable {
+                Button { onOpenComments?() } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "bubble.right")
+                            .font(.title3.weight(.semibold))
+                        Text(commentCount.compactFormatted)
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .contentTransition(.numericText())
+                    }
+                    .foregroundColor(.primary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Comments, \(commentCount)")
+            }
+
+            ShareLink(item: DeepLinkRouter.assetURL(for: asset.id),
+                      subject: Text(asset.name ?? "AR creation"),
+                      message: Text("Check out \(asset.name ?? "this AR creation") on Locolo")) {
+                Image(systemName: "paperplane")
+                    .font(.title3.weight(.semibold))
+                    .foregroundColor(.primary)
+            }
+            .accessibilityLabel("Share")
+
+            Spacer()
+
+            if isCloseEnoughForAR, let onOpenInAR {
+                Button(action: onOpenInAR) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arkit")
+                        Text("View in AR")
+                    }
+                    .font(.caption.weight(.bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(AppColors.purplePinkGradient))
+                }
+                .accessibilityLabel("Open in AR")
+            }
+
+            Button(action: toggleWishlist) {
+                Image(systemName: isWishlisted ? "bookmark.fill" : "bookmark")
+                    .font(.title3.weight(.semibold))
+                    .foregroundColor(isWishlisted ? .purple : .primary)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isWishlisted ? "Remove from saved" : "Save")
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+    }
+
+    // MARK: - Caption
+
+    private var captionSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
             Text(asset.name ?? "Untitled")
                 .font(.headline)
                 .foregroundColor(.primary)
@@ -178,73 +305,41 @@ struct ARSocialAssetCard: View {
                     .lineLimit(2)
             }
 
-            HStack(spacing: 18) {
-                statItem(icon: "bolt.fill", value: asset.hypeCount, label: "hypes", color: .yellow)
-                statItem(icon: "eye.fill", value: asset.viewCount, label: "views", color: .secondary)
-
-                Spacer()
-
-                Button(action: toggleWishlist) {
-                    Image(systemName: isWishlisted ? "heart.fill" : "heart")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(isWishlisted ? .pink : .secondary)
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(ARDesign.headerButtonCircle))
-                        .contentTransition(.symbolEffect(.replace))
-                }
-                .accessibilityLabel(isWishlisted ? "Remove from wishlist" : "Save to wishlist")
-
-                if let url = URL(string: asset.fileUrl) {
-                    ShareLink(item: url, subject: Text(asset.name ?? "AR Asset")) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.subheadline.weight(.semibold))
+            HStack(spacing: 10) {
+                if engagement.commentsAvailable && commentCount > 0 {
+                    Button { onOpenComments?() } label: {
+                        Text(commentCount == 1 ? "View 1 comment" : "View all \(commentCount) comments")
+                            .font(.footnote)
                             .foregroundColor(.secondary)
-                            .frame(width: 34, height: 34)
-                            .background(Circle().fill(ARDesign.headerButtonCircle))
                     }
-                    .accessibilityLabel("Share asset")
+                    .buttonStyle(.plain)
                 }
-
-                if isCloseEnoughForAR, let onOpenInAR {
-                    Button(action: onOpenInAR) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arkit")
-                            Text("Open")
-                        }
-                        .font(.caption.weight(.bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
-                        .background(Capsule().fill(AppColors.purplePinkGradient))
-                    }
-                    .accessibilityLabel("Open in AR")
+                if asset.viewCount > 0 {
+                    Label("\(asset.viewCount.compactFormatted) explorers", systemImage: "eye")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .labelStyle(.titleAndIcon)
                 }
             }
+            .padding(.top, 2)
         }
-        .padding(14)
-    }
-
-    private func statItem(icon: String, value: Int, label: String, color: Color) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundColor(color)
-            Text("\(value)")
-                .font(.caption.weight(.semibold))
-                .foregroundColor(.secondary)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(value) \(label)")
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 14)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen?() }
     }
 
     // MARK: - Helpers
 
-    private var locationLabel: String {
-        if let loc = asset.displayLocation { return loc }
-        if let lat = asset.latitude, let lon = asset.longitude {
-            return String(format: "%.3f°, %.3f°", lat, lon)
+    private func doubleTapHype() {
+        ARHaptics.success()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) { burst = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            withAnimation(.easeOut(duration: 0.25)) { burst = false }
         }
-        return "Unknown location"
+        Task { await engagement.hypeIfNeeded(asset) }
     }
 
     private func toggleWishlist() {

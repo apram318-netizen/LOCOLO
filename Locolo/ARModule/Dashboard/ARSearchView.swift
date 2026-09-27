@@ -17,6 +17,7 @@ struct ARSearchView: View {
 
     @State private var selectedAsset: DigitalAsset?
     @State private var showFilters = false
+    @State private var people: [ARCreator] = []
     @FocusState private var searchFocused: Bool
 
     /// Recent searches persist across sessions as a JSON-encoded array.
@@ -67,10 +68,13 @@ struct ARSearchView: View {
             }
         }
         .task { await vm.loadArtworks() }
+        .task(id: vm.searchQuery) { await searchPeople() }
         .sheet(item: $selectedAsset) { asset in
-            AssetDetailSheet(asset: asset, onOpenCreator: {
-                dashboardState.path.append(.profile(userId: asset.userId))
-            })
+            AssetDetailSheet(
+                asset: asset,
+                onOpenCreator: { dashboardState.path.append(.profile(userId: asset.userId)) },
+                onOpenProfile: { dashboardState.path.append(.profile(userId: $0)) }
+            )
         }
         .sheet(isPresented: $showFilters) {
             filterSheet
@@ -86,7 +90,7 @@ struct ARSearchView: View {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
-                TextField("Search assets, categories, places…", text: $vm.searchQuery)
+                TextField("Search creators, assets, places…", text: $vm.searchQuery)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
                     .submitLabel(.search)
@@ -218,8 +222,63 @@ struct ARSearchView: View {
 
     // MARK: - Results
 
+    private func searchPeople() async {
+        let q = vm.searchQuery.trimmingCharacters(in: .whitespaces)
+        guard q.count >= 2 else {
+            if !people.isEmpty { withAnimation(ARDesign.spring) { people = [] } }
+            return
+        }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        guard !Task.isCancelled else { return }
+        let found = await PeopleSearch.search(q, limit: 12)
+        guard !Task.isCancelled else { return }
+        withAnimation(ARDesign.spring) { people = found }
+    }
+
+    private var peopleSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ARSectionHeader(title: "Creators", icon: "person.2.fill")
+                .padding(.horizontal, 16)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(people) { person in
+                        VStack(spacing: 6) {
+                            ARAvatarView(url: person.avatarUrl, name: person.displayName, size: 62)
+                                .padding(2)
+                                .overlay(Circle().strokeBorder(AppColors.purplePinkGradient, lineWidth: 1.5))
+                            ARCreatorName(creator: person, font: .caption.weight(.semibold))
+                            Text("@\(person.username)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                            ARFollowButton(userId: person.id, style: .compact)
+                        }
+                        .frame(width: 104)
+                        .padding(.vertical, 12)
+                        .arGlassCard(cornerRadius: 16)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            commitSearch(vm.searchQuery)
+                            dashboardState.path.append(.profile(userId: person.id))
+                        }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityAction(named: "Open profile") {
+                            dashboardState.path.append(.profile(userId: person.id))
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
     private var resultsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if !people.isEmpty {
+                peopleSection
+            }
+
             // Semantic matches surface above the keyword results when the
             // pgvector pipeline returns anything for this query. (WS5.3)
             if vm.isDeepSearching || !vm.semanticResults.isEmpty {

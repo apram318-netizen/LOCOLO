@@ -20,6 +20,8 @@ struct ARDashboardRootView: View {
     @EnvironmentObject var userVM: UserViewModel
     @EnvironmentObject var wishlistVM: WishlistViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var deepLinks = DeepLinkRouter.shared
 
     /// Tabs are created lazily on first visit, then kept alive so each
     /// screen preserves its scroll position, map camera, and search state.
@@ -55,7 +57,15 @@ struct ARDashboardRootView: View {
         .onChange(of: dashboardState.selectedTab) { _, newTab in
             visitedTabs.insert(newTab)
         }
+        // Profile links (locolo://user/<id>) push onto the dashboard stack.
+        .onChange(of: deepLinks.pendingUserId) { openPendingProfileLink() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await ActivityStore.shared.refresh(force: false) }
+            }
+        }
         .task {
+            openPendingProfileLink()
             if let user = userVM.currentUser {
                 await wishlistVM.loadWishlist(for: user.id)
             }
@@ -68,6 +78,16 @@ struct ARDashboardRootView: View {
                 onboardingSeen = true
                 showOnboarding = false
             }
+        }
+    }
+
+    private func openPendingProfileLink() {
+        guard let userId = deepLinks.consumeUser() else { return }
+        if userId == userVM.currentUser?.id {
+            dashboardState.path = []
+            dashboardState.select(.profile)
+        } else if !SafetyService.shared.isBlocked(userId) {
+            dashboardState.path.append(.profile(userId: userId))
         }
     }
 
@@ -130,6 +150,10 @@ struct ARDashboardRootView: View {
                              currentUserId: me.id.uuidString,
                              currentUserName: me.name ?? me.username)
             }
+        case .activity:
+            ARActivityView()
+        case .editProfile:
+            AREditProfileView()
         }
     }
 }
