@@ -59,7 +59,7 @@ class WishlistViewModel: ObservableObject {
     /// - Parameters:
     ///   - userId: The current user’s ID.
     ///   - assetId: The ID of the asset being added.
-    func addToWishlist(userId: UUID, assetId: UUID) async {
+    func addToWishlist(userId: UUID, assetId: UUID, asset: DigitalAsset? = nil) async {
         do {
             try await client
                 .from("wishlist")
@@ -68,6 +68,9 @@ class WishlistViewModel: ObservableObject {
                     "asset_id": assetId.uuidString
                 ])
                 .execute()
+            if let asset, !items.contains(where: { $0.id == asset.id }) {
+                items.insert(asset, at: 0)
+            }
             print(" Added to wishlist")
         } catch {
             print(" Failed to add to wishlist:", error)

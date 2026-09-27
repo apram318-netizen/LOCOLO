@@ -15,6 +15,8 @@ import Supabase
 final class ARProfileViewModel: ObservableObject {
     @Published var ownAssets: [DigitalAsset] = []
     @Published var exploredAssets: [DigitalAsset] = []
+    /// Last-seen date per explored asset (Explorer Passport streaks).
+    @Published var exploredDates: [Date] = []
     @Published var offersByAsset: [UUID: [Offer]] = [:]
     @Published var isLoading = false
     @Published var isLoadingOffers = false
@@ -94,7 +96,7 @@ final class ARProfileViewModel: ObservableObject {
     var categoryBreakdown: [(category: String, count: Int)] {
         var counts: [String: Int] = [:]
         for asset in ownAssets {
-            var cat = (asset.category ?? "other").lowercased()
+            var cat = asset.normalizedCategory ?? "other"
             if !ARProfileViewModel.categoryOrder.contains(cat) { cat = "other" }
             counts[cat, default: 0] += 1
         }
@@ -118,11 +120,13 @@ final class ARProfileViewModel: ObservableObject {
                 .order("created_at", ascending: false)
                 .execute()
                 .value
-            async let seen = SeenAssetsRepository.shared.fetchSeenAssets(userId: userId)
+            async let seen = SeenAssetsRepository.shared.fetchSeenHistory(userId: userId)
 
             ownAssets = try await own
             // Your own assets don't belong in "Explored"
-            exploredAssets = try await seen.filter { $0.userId != userId }
+            let history = try await seen.filter { $0.asset.userId != userId }
+            exploredAssets = history.map(\.asset)
+            exploredDates = history.map(\.seenAt)
         } catch {
             errorMessage = "Failed to load profile: \(error.localizedDescription)"
         }

@@ -35,7 +35,10 @@ struct AssetDetailSheet: View {
     @State private var resolvedLocationName: String = "Unknown"
     @State private var isWishlisted: Bool = false
     @State private var isHyped: Bool = false
+    @State private var isTogglingHype = false
     @State private var hypeCount: Int = 0
+    @State private var showReport = false
+    @State private var confirmBlock = false
     
     var body: some View {
         NavigationStack {
@@ -88,6 +91,21 @@ struct AssetDetailSheet: View {
                         .foregroundColor(.white)
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    moreMenu
+                }
+            }
+            .sheet(isPresented: $showReport, onDismiss: {
+                // A reported asset is hidden for this user — close its page too.
+                if SafetyService.shared.isHidden(asset) { dismiss() }
+            }) {
+                ReportSheet(assetId: asset.id, userId: asset.userId,
+                            subjectName: asset.name ?? "this asset")
+            }
+            .confirmationDialog("Block this creator?", isPresented: $confirmBlock, titleVisibility: .visible) {
+                Button("Block", role: .destructive) { blockCreator() }
+            } message: {
+                Text("You won't see their assets anywhere in Locolo. You can unblock them in Settings.")
             }
             .onAppear {
                 computeDistance()
@@ -306,7 +324,7 @@ extension AssetDetailSheet {
                         MatteOfferButton(title: "View Offers")
                     }
                     .sheet(isPresented: $showOffers) {
-                        OfferListView(assetId: asset.id)
+                        OfferListView(assetId: asset.id, ownerId: asset.userId)
                     }
                     
                 } else {
@@ -358,13 +376,55 @@ extension AssetDetailSheet {
 
 // MARK: - ENGAGEMENT ACTIONS
 extension AssetDetailSheet {
-    private func toggleHype() {
+    private var moreMenu: some View {
+        Menu {
+            ShareLink(
+                item: DeepLinkRouter.assetURL(for: asset.id),
+                subject: Text(asset.name ?? "AR asset on Locolo"),
+                message: Text("Check out \"\(asset.name ?? "this AR asset")\" on Locolo")
+            ) {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            if !isCurrentUserOwner {
+                Divider()
+                Button {
+                    showReport = true
+                } label: {
+                    Label("Report asset", systemImage: "flag")
+                }
+                Button(role: .destructive) {
+                    confirmBlock = true
+                } label: {
+                    Label("Block creator", systemImage: "hand.raised")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .foregroundColor(.white)
+        }
+        .accessibilityLabel("More actions")
+    }
+
+    private func blockCreator() {
         guard let me = userVM.currentUser?.id else { return }
+        ARHaptics.success()
+        Task {
+            await SafetyService.shared.block(asset.userId, by: me)
+            dismiss()
+        }
+    }
+
+    private func toggleHype() {
+        // One toggle in flight at a time: overlapping RPCs can resolve out of
+        // order and leave the heart showing the opposite of the server state.
+        guard let me = userVM.currentUser?.id, !isTogglingHype else { return }
+        isTogglingHype = true
         ARHaptics.tick()
         // Optimistic flip; reconcile with the server's answer.
         isHyped.toggle()
         hypeCount += isHyped ? 1 : -1
         Task {
+            defer { isTogglingHype = false }
             if let state = await AssetEngagementRepository.shared.toggleHype(userId: me, assetId: asset.id) {
                 isHyped = state.hyped
                 hypeCount = state.hype_count
@@ -385,7 +445,7 @@ extension AssetDetailSheet {
             if was {
                 await wishlistVM.removeFromWishlist(userId: me, assetId: asset.id)
             } else {
-                await wishlistVM.addToWishlist(userId: me, assetId: asset.id)
+                await wishlistVM.addToWishlist(userId: me, assetId: asset.id, asset: asset)
             }
         }
     }

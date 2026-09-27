@@ -1,4 +1,8 @@
 -- =============================================================================
+-- ⛔ SUPERSEDED — DO NOT APPLY. Use 2026_ar_safety_and_hardening.sql instead.
+--    This draft left users.email readable, had no seller policy on offers,
+--    trusted toggle_asset_hype's p_user, and wasn't idempotent.
+-- =============================================================================
 -- Locolo AR Release — Row Level Security (WS9 security hardening)
 --
 -- ⚠️ DO NOT APPLY BLINDLY. Review + confirm the caveat below first, then run in

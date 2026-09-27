@@ -37,10 +37,30 @@ final class AssetEngagementRepository {
                     p_user: userId.uuidString, p_asset: assetId.uuidString))
                 .execute()
                 .value
-            return rows.first
+            let state = rows.first
+            if state?.hyped == true {
+                // A positive signal — fold this asset into the taste vector.
+                Self.sendTasteSignal(userId: userId, assetId: assetId)
+            }
+            return state
         } catch {
             print("toggleHype failed:", error.localizedDescription)
             return nil
+        }
+    }
+
+    /// Fire-and-forget call to the update-taste edge function (WS5.1). Folds an
+    /// engaged asset's embedding into users.taste_embedding. Silently no-ops
+    /// until the function is deployed — personalization just stays cold.
+    static func sendTasteSignal(userId: UUID, assetId: UUID) {
+        Task.detached(priority: .background) {
+            // The function derives the user from the JWT; user_id is only sent
+            // for backward compatibility with the pre-hardening deployment.
+            guard let request = try? await EdgeFunctions.request("update-taste", body: [
+                "user_id": userId.uuidString.lowercased(),
+                "asset_id": assetId.uuidString.lowercased()
+            ]) else { return }
+            _ = try? await URLSession.shared.data(for: request)
         }
     }
 

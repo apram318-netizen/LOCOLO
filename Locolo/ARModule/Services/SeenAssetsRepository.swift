@@ -43,6 +43,8 @@ final class SeenAssetsRepository {
                     onConflict: "user_id,asset_id"
                 )
                 .execute()
+            // Exploring an asset in AR is a taste signal too. (WS5.1)
+            AssetEngagementRepository.sendTasteSignal(userId: userId, assetId: assetId)
         } catch {
             print(" Failed to record seen asset:", error.localizedDescription)
         }
@@ -52,6 +54,12 @@ final class SeenAssetsRepository {
     /// - Description: Returns the assets this user has seen in AR, most
     /// recently seen first, via the asset_views → digital_assets embed.
     func fetchSeenAssets(userId: UUID) async throws -> [DigitalAsset] {
+        try await fetchSeenHistory(userId: userId).map(\.asset)
+    }
+
+    /// Same as `fetchSeenAssets` but keeps each row's last `seen_at`, which
+    /// the Explorer Passport uses for activity streaks.
+    func fetchSeenHistory(userId: UUID) async throws -> [(seenAt: Date, asset: DigitalAsset)] {
         let rows: [SeenAssetRow] = try await client
             .from("asset_views")
             .select("seen_at, digital_assets(*)")
@@ -60,6 +68,6 @@ final class SeenAssetsRepository {
             .execute()
             .value
 
-        return rows.map(\.asset)
+        return rows.map { (seenAt: $0.seenAt, asset: $0.asset) }
     }
 }

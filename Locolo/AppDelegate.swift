@@ -69,35 +69,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let userInfo = response.notification.request.content.userInfo
-
-        // Check if the user pressed Reply
-        if response.actionIdentifier == "REPLY_ACTION",
-           let textResponse = response as? UNTextInputNotificationResponse {
-
-            let replyText = textResponse.userText
-
-            print("User replied: \(replyText)")
-
-            // Send reply to your chat system
-            if let convoId = userInfo["conversationId"] as? String,
-               let senderId = userInfo["receiverId"] as? String,      // your user
-               let senderName = userInfo["receiverName"] as? String { // your username
-                
-                Task {
-                    try? await ChatRepository().sendMessage(
-                        conversationId: convoId,
-                        message: Message(
-                            senderId: senderId,
-                            senderName: senderName,
-                            text: replyText,
-                            time: Date()
-                        )
-                    )
-                }
-            }
-        }
-
+        // Inline replies are handled by NotificationManager (the registered
+        // delegate), which encrypts before sending. Never write chat messages
+        // from here: a raw ChatRepository send would store plaintext.
         completionHandler()
     }
     

@@ -25,7 +25,9 @@ struct OfferAssetId: Identifiable {
 
 struct WishlistView: View {
     @EnvironmentObject var userVM: UserViewModel
-    @StateObject private var vm = WishlistViewModel()
+    /// Shared app-wide instance, so hearts toggled in AssetDetailSheet show
+    /// up here immediately (a private instance went stale).
+    @EnvironmentObject private var vm: WishlistViewModel
     @State private var filterBy: String = "all"
 
     var searchQuery: String = ""
@@ -37,13 +39,18 @@ struct WishlistView: View {
 
     // Filtering
     var filteredWishlist: [DigitalAsset] {
-        vm.items.filter { asset in
+        SafetyService.shared.visible(vm.items).filter { asset in
             let matchesSearch =
                 searchQuery.isEmpty ||
                 asset.name?.localizedCaseInsensitiveContains(searchQuery) == true ||
-                asset.category?.localizedCaseInsensitiveContains(searchQuery) == true
+                asset.categoryLabel?.localizedCaseInsensitiveContains(searchQuery) == true
 
-            let matchesFilter = filterBy == "all" || asset.visibility == filterBy
+            let matchesFilter: Bool
+            switch filterBy {
+            case "for sale": matchesFilter = asset.isForSale == true
+            case "offers":   matchesFilter = asset.acceptsOffers == true
+            default:         matchesFilter = true
+            }
             return matchesSearch && matchesFilter
         }
     }
@@ -79,11 +86,11 @@ struct WishlistView: View {
 
             // Filter buttons
             HStack {
-                ForEach(["all", "normal", "rare", "legendary"], id: \.self) { filter in
+                ForEach(["all", "for sale", "offers"], id: \.self) { filter in
                     FilterButton(
                         title: filter,
                         isActive: filterBy == filter,
-                        gradient: AppColors.rarityGradient(filter),
+                        gradient: AppColors.visibilityGradient(filter == "all" ? "all" : "public"),
                         action: { filterBy = filter }
                     )
                 }
@@ -167,16 +174,16 @@ struct WishlistCard: View {
                     Text(asset.name ?? "Untitled")
                         .font(.headline)
                         .foregroundColor(AppColors.primaryText)
-                    Text(asset.category ?? "Uncategorized")
+                    Text(asset.categoryLabel ?? "Uncategorized")
                         .font(.subheadline)
                         .foregroundColor(AppColors.secondaryText)
 
                     HStack(spacing: 8) {
-                        Text(asset.visibility.capitalized)
+                        Text(asset.normalizedVisibility.capitalized)
                             .font(.caption)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(AppColors.rarityGradient(asset.visibility ))
+                            .background(AppColors.visibilityGradient(asset.normalizedVisibility))
                             .cornerRadius(12)
                             .foregroundColor(.white)
                     }

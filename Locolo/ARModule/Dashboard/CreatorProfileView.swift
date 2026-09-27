@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import MapKit
 
 struct CreatorProfileView: View {
     let userId: UUID
@@ -16,9 +17,33 @@ struct CreatorProfileView: View {
     @EnvironmentObject private var userVM: UserViewModel
     @Environment(\.dismiss) private var dismiss
 
+    @ObservedObject private var safety = SafetyService.shared
+
     @State private var selectedAsset: DigitalAsset?
     @State private var activeChat: ActiveChat?
     @State private var isOpeningChat = false
+    @State private var showReport = false
+    @State private var confirmBlock = false
+
+    private var isBlocked: Bool { safety.isBlocked(userId) }
+
+    /// Mirrors the server's da_select policy so private/friends assets stay
+    /// hidden even before the RLS migration is applied.
+    private var visibleAssets: [DigitalAsset] {
+        guard !isBlocked else { return [] }
+        return safety.visible(vm.assets).filter { asset in
+            switch asset.normalizedVisibility {
+            case "private": return vm.isSelf
+            case "friends": return vm.isSelf || vm.isFollowing
+            default:        return true
+            }
+        }
+    }
+
+    private var visiblePins: [AssetPlacementPin] {
+        let ids = Set(visibleAssets.map(\.id))
+        return vm.pins.filter { ids.contains($0.id) }
+    }
 
     /// Identifiable wrapper so the chat sheet can be driven by .sheet(item:).
     private struct ActiveChat: Identifiable {
@@ -36,17 +61,29 @@ struct CreatorProfileView: View {
         ZStack {
             ARDesign.screenBackground.ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 20) {
-                    header
-                    if vm.canFollow || vm.isSelf { actionRow }
-                    assetGrid
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 20) {
+                        header(scrollToAssets: {
+                            withAnimation(.easeInOut) { proxy.scrollTo("assets", anchor: .top) }
+                        })
+                        if let error = vm.errorMessage {
+                            errorBanner(error)
+                        }
+                        if isBlocked {
+                            blockedState
+                        } else {
+                            if vm.canFollow || vm.isSelf { actionRow }
+                            if !visiblePins.isEmpty { placementMap }
+                            assetGrid.id("assets")
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 32)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 32)
+                .refreshable { await vm.load() }
             }
-            .refreshable { await vm.load() }
 
             if vm.isLoading && vm.user == nil {
                 ProgressView().tint(.purple).scaleEffect(1.3)
@@ -55,7 +92,9 @@ struct CreatorProfileView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             ARGlassHeader(title: vm.creator?.displayName ?? "Profile",
                           subtitle: vm.user.map { "@\($0.username)" }) {
-                EmptyView()
+                if !vm.isSelf && userVM.currentUser != nil {
+                    safetyMenu
+                }
             }
             .overlay(alignment: .leading) {
                 Button { dismiss() } label: {
@@ -72,25 +111,97 @@ struct CreatorProfileView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task { await vm.load() }
         .sheet(item: $selectedAsset) { AssetDetailSheet(asset: $0) }
+        .sheet(isPresented: $showReport) {
+            ReportSheet(assetId: nil, userId: userId,
+                        subjectName: vm.creator?.displayName ?? "this creator")
+        }
+        .confirmationDialog("Block \(vm.creator?.displayName ?? "this creator")?",
+                            isPresented: $confirmBlock, titleVisibility: .visible) {
+            Button("Block", role: .destructive) { setBlocked(true) }
+        } message: {
+            Text("You won't see their assets anywhere in Locolo. You can unblock them any time.")
+        }
         .sheet(item: $activeChat) { chat in
             // E2E chat with this creator (WS6). peerId passed explicitly so the
             // key derives immediately without a participants fetch.
             if let me = userVM.currentUser {
                 NavigationStack {
-                    ChatView(
-                        vm: ChatViewModel(
-                            conversationId: chat.id,
-                            userId: me.id.uuidString.lowercased(),
-                            peerId: userId
-                        ),
-                        currentUserId: me.id.uuidString.lowercased(),
-                        currentUserName: me.name ?? me.username
-                    )
-                    .navigationTitle(vm.creator?.displayName ?? "Chat")
-                    .navigationBarTitleDisplayMode(.inline)
+                    ARChatScreen(conversationId: chat.id, peerId: userId,
+                                 title: vm.creator?.displayName ?? "Chat",
+                                 currentUserId: me.id.uuidString,
+                                 currentUserName: me.name ?? me.username)
                 }
             }
         }
+    }
+
+    // MARK: - Safety
+
+    private var safetyMenu: some View {
+        Menu {
+            Button {
+                showReport = true
+            } label: {
+                Label("Report creator", systemImage: "flag")
+            }
+            if isBlocked {
+                Button {
+                    setBlocked(false)
+                } label: {
+                    Label("Unblock", systemImage: "hand.raised.slash")
+                }
+            } else {
+                Button(role: .destructive) {
+                    confirmBlock = true
+                } label: {
+                    Label("Block", systemImage: "hand.raised")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.subheadline.bold())
+                .foregroundColor(.primary)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(ARDesign.headerButtonCircle))
+        }
+        .accessibilityLabel("More actions")
+    }
+
+    private func setBlocked(_ blocked: Bool) {
+        guard let me = userVM.currentUser?.id else { return }
+        ARHaptics.tick()
+        Task {
+            if blocked {
+                await safety.block(userId, by: me)
+            } else {
+                await safety.unblock(userId, by: me)
+            }
+        }
+    }
+
+    private var blockedState: some View {
+        ARInlineEmptyState(
+            icon: "hand.raised.fill",
+            title: "You blocked this creator",
+            subtitle: "Their assets are hidden from your feeds, map, and AR view.",
+            actionTitle: "Unblock",
+            action: { setBlocked(false) }
+        )
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .foregroundColor(.orange)
+            Text(message)
+                .font(.footnote)
+                .foregroundColor(.primary)
+            Spacer(minLength: 0)
+            Button("Retry") { Task { await vm.load() } }
+                .font(.footnote.weight(.semibold))
+        }
+        .padding(12)
+        .arGlassCard(cornerRadius: 14)
     }
 
     // MARK: - Messaging
@@ -120,7 +231,7 @@ struct CreatorProfileView: View {
 
     // MARK: - Header
 
-    private var header: some View {
+    private func header(scrollToAssets: @escaping () -> Void) -> some View {
         VStack(spacing: 14) {
             AsyncImage(url: vm.user?.avatarUrl) { image in
                 image.resizable().scaledToFill()
@@ -155,13 +266,13 @@ struct CreatorProfileView: View {
                     .padding(.horizontal, 8)
             }
 
-            statsRow
+            statsRow(scrollToAssets: scrollToAssets)
         }
     }
 
-    private var statsRow: some View {
+    private func statsRow(scrollToAssets: @escaping () -> Void) -> some View {
         HStack(spacing: 0) {
-            statPill(count: vm.assets.count, label: "Assets") {}
+            statPill(count: visibleAssets.count, label: "Assets", action: scrollToAssets)
             divider
             statPill(count: vm.followers, label: "Followers") {
                 dashboardState.path.append(.followList(userId: userId, followers: true))
@@ -242,19 +353,56 @@ struct CreatorProfileView: View {
         }
     }
 
+    // MARK: - Placement map
+
+    private var placementMap: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ARSectionHeader(title: "On the Map",
+                            subtitle: visiblePins.count == 1 ? "1 placement" : "\(visiblePins.count) placements",
+                            icon: "map")
+
+            Map(initialPosition: .automatic) {
+                ForEach(visiblePins) { pin in
+                    Annotation(pin.name ?? "Asset",
+                               coordinate: CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)) {
+                        Button {
+                            selectedAsset = visibleAssets.first { $0.id == pin.id }
+                        } label: {
+                            Image(systemName: "cube.fill")
+                                .font(.caption.weight(.bold))
+                                .foregroundColor(.white)
+                                .padding(7)
+                                .background(Circle().fill(AppColors.purplePinkGradient))
+                                .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
+                                .shadow(radius: 3)
+                        }
+                        .accessibilityLabel("Open \(pin.name ?? "asset")")
+                    }
+                }
+            }
+            .mapStyle(.standard(pointsOfInterest: .excludingAll))
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(ARDesign.hairline, lineWidth: 1)
+            )
+        }
+    }
+
     // MARK: - Assets
 
     private var assetGrid: some View {
         VStack(alignment: .leading, spacing: 12) {
             ARSectionHeader(title: "Placed Assets",
-                            subtitle: vm.assets.isEmpty ? nil : "\(vm.assets.count) in the world",
+                            subtitle: visibleAssets.isEmpty ? nil : "\(visibleAssets.count) in the world",
                             icon: "cube.transparent")
 
-            if vm.assets.isEmpty {
+            if visibleAssets.isEmpty {
                 emptyAssets
             } else {
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(vm.assets) { asset in
+                    ForEach(visibleAssets) { asset in
                         Button { selectedAsset = asset } label: {
                             AssetThumbnailView(asset: asset, cornerRadius: 16)
                                 .aspectRatio(1, contentMode: .fill)

@@ -24,19 +24,26 @@ struct ARExploreView: View {
 
             if vm.isLoading {
                 loadingView
-            } else if let error = vm.errorMessage {
-                Text(error)
-                    .foregroundColor(.red)
-                    .padding()
             } else {
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        featuredSection
-                        feedSection
+                    if let error = vm.errorMessage {
+                        ARInlineEmptyState(
+                            icon: "wifi.exclamationmark",
+                            title: "You're offline",
+                            subtitle: error,
+                            actionTitle: "Retry",
+                            action: { Task { await vm.refresh() } }
+                        )
+                        .padding(.top, 60)
+                    } else {
+                        VStack(spacing: 0) {
+                            featuredSection
+                            feedSection
+                        }
+                        .padding(.bottom, 24)
                     }
-                    .padding(.bottom, 24)
                 }
-                .refreshable { await vm.load() }
+                .refreshable { await vm.refresh() }
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -81,7 +88,7 @@ struct ARExploreView: View {
             .padding(.horizontal, 16)
             .padding(.top, 12)
 
-            if vm.featuredAssets.isEmpty {
+            if vm.visibleFeatured.isEmpty {
                 emptyFeaturedPlaceholder
             } else {
                 featuredCarousel
@@ -91,7 +98,7 @@ struct ARExploreView: View {
 
     private var featuredCarousel: some View {
         TabView(selection: $featuredPage) {
-            ForEach(Array(vm.featuredAssets.enumerated()), id: \.element.id) { index, asset in
+            ForEach(Array(vm.visibleFeatured.enumerated()), id: \.element.id) { index, asset in
                 ARFeaturedCard(asset: asset)
                     .padding(.horizontal, 16)
                     .onTapGesture { selectedAsset = asset }

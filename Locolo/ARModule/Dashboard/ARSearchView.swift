@@ -50,6 +50,7 @@ struct ARSearchView: View {
                 .padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.immediately)
+            .refreshable { await vm.refreshArtworks() }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 10) {

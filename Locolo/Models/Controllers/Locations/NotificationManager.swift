@@ -71,18 +71,20 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         if response.actionIdentifier == "REPLY_ACTION",
            let reply = (response as? UNTextInputNotificationResponse)?.userText,
            let convoId = userInfo["conversationId"] as? String,
-           let senderName = userInfo["senderName"] as? String {
-            
-            // fire off a background send
+           let currentUserId = SupabaseManager.shared.currentUserId {
+
+            // The reply is from US — userInfo["senderName"] is the peer who
+            // messaged, so never reuse it here.
+            let myName = UserDefaults.standard.string(forKey: ARAppRootView.displayNameDefaultsKey) ?? "Me"
+
+            // ChatViewModel encrypts (and refuses to send if it can't), so a
+            // quick reply never leaks plaintext to Firestore.
             Task {
-                let currentUserId = SupabaseManager.shared.currentUserId ?? ""
-                
-                // loading the chat VM for this convo
                 let vm = ChatViewModel(conversationId: convoId, userId: currentUserId)
-                
-                // send message with basic metadata
-                vm.sendMessage(reply, senderId: currentUserId, senderName: senderName)
+                await vm.sendMessage(reply, senderId: currentUserId, senderName: myName)
+                completionHandler()
             }
+            return
         }
 
         completionHandler()
@@ -111,7 +113,11 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         
         let content = UNMutableNotificationContent()
         content.title = message.senderName      // who messaged
-        content.body = message.text            // the message
+        // Callers pass the decrypted body when they have the key; if it still
+        // looks like ciphertext, show a neutral line instead of base64.
+        let looksEncrypted = message.text.count >= 40 && !message.text.contains(" ")
+            && Data(base64Encoded: message.text) != nil
+        content.body = looksEncrypted ? "🔒 New encrypted message" : message.text
         content.sound = .default
         content.categoryIdentifier = "CHAT_MESSAGE"
         content.userInfo = [

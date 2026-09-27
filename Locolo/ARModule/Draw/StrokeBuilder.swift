@@ -87,11 +87,32 @@ enum StrokeBuilder {
                 let i1 = UInt32(a + sNext)
                 let i2 = UInt32(b + s)
                 let i3 = UInt32(b + sNext)
-                geo.indices.append(contentsOf: [i0, i2, i1, i1, i2, i3])
+                // (normal, binormal, tangent) is right-handed, so this order
+                // gives counter-clockwise, outward-facing triangles.
+                geo.indices.append(contentsOf: [i0, i1, i2, i1, i3, i2])
             }
         }
 
+        addCap(to: &geo, center: pts[0], ringStart: ringStartIndices[0], sides: sides,
+               outward: -simd_normalize(pts[1] - pts[0]), facesBackward: true)
+        addCap(to: &geo, center: pts[pts.count - 1], ringStart: ringStartIndices[pts.count - 1], sides: sides,
+               outward: simd_normalize(pts[pts.count - 1] - pts[pts.count - 2]), facesBackward: false)
+
         return geo
+    }
+
+    /// Closes a tube end with a triangle fan so strokes don't look hollow.
+    private static func addCap(to geo: inout StrokeGeometry, center: SIMD3<Float>, ringStart: Int,
+                               sides: Int, outward: SIMD3<Float>, facesBackward: Bool) {
+        let centerIndex = UInt32(geo.positions.count)
+        geo.positions.append(center)
+        geo.normals.append(outward)
+        for s in 0..<sides {
+            let a = UInt32(ringStart + s)
+            let b = UInt32(ringStart + (s + 1) % sides)
+            // Ring order is counter-clockwise seen from +tangent.
+            geo.indices.append(contentsOf: facesBackward ? [centerIndex, b, a] : [centerIndex, a, b])
+        }
     }
 
     /// Merge several stroke geometries into one, offsetting indices.

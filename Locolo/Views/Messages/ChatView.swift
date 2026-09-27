@@ -65,6 +65,10 @@ struct ChatView: View {
                 }
             }
 
+            if let error = vm.sendError {
+                sendErrorBanner(error)
+            }
+
             inputBar
         }
         .background(ARDesign.screenBackground.ignoresSafeArea())
@@ -185,10 +189,39 @@ struct ChatView: View {
     }
 
     private func send() {
-        let body = text.trimmingCharacters(in: .whitespaces)
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }
         ARHaptics.tick()
-        vm.sendMessage(body, senderId: currentUserId.lowercased(), senderName: currentUserName)
         text = ""
+        Task {
+            let sent = await vm.sendMessage(body, senderId: currentUserId.lowercased(), senderName: currentUserName)
+            if !sent {
+                ARHaptics.warning()
+                if text.isEmpty { text = body }
+            }
+        }
+    }
+
+    private func sendErrorBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.trianglebadge.exclamationmark.fill")
+                .foregroundColor(.orange)
+            Text(message)
+                .font(.caption)
+                .foregroundColor(.primary)
+            Spacer(minLength: 0)
+            Button {
+                vm.sendError = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2.bold())
+                    .foregroundColor(.secondary)
+            }
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.bottom, 6)
     }
 }

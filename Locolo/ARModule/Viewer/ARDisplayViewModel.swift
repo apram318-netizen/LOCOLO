@@ -50,10 +50,18 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
     /// Set when we can't get going (no GPS fix, etc.) and a manual retry helps. (WS3)
     @Published var showRetry = false
 
+    // MARK: Hot/cold finder (logic in ARDisplayViewModel+Finder.swift)
+    @Published var finderTrend: FinderTrend = .steady
+    /// Set briefly when the user walks up to an asset for the first time.
+    @Published var justFound: DigitalAsset?
+    var finderLastDistance: Double?
+    var finderLastTargetId: UUID?
+
     /// Where we last fetched assets from; when the user walks past
     /// `refetchDistanceMeters` we reload so newly-nearby assets appear. (WS3)
     private var lastFetchOrigin: CLLocation?
     private let refetchDistanceMeters: Double = 75
+    private var lastFailedFetchRetry = Date.distantPast
     /// Fires if no GPS fix arrives shortly after we start, to surface a retry. (WS3)
     private var noFixTask: Task<Void, Never>?
 
@@ -65,8 +73,34 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         }
     }
 
+    /// True once ARKit confirmed geo-tracking data exists here, which is when
+    /// a manual Geo ⇄ GPS switch is meaningful.
+    @Published private(set) var geoAvailableHere = false
+    private static let prefersGPSModeKey = "ar.prefersGPSMode"
+    private var prefersGPSMode: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.prefersGPSModeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.prefersGPSModeKey) }
+    }
+
+    /// Camera position (world space) that corresponds to `worldOriginLocation`.
+    /// Zero at session start; moved on re-anchor so GPS-mode placement is
+    /// measured from a recent fix instead of drifting from the session start.
+    private var worldOriginCameraOffset = SIMD3<Float>(repeating: 0)
+    private var worldAnchors: [UUID: (anchor: AnchorEntity, asset: DigitalAsset)] = [:]
+    private let reanchorMaxAccuracyMeters: Double = 25
+
     // Tracks placed asset ids
     private var placedIds = Set<UUID>()
+
+    /// Whether THIS view model has started a session. The ARView is a shared
+    /// singleton, so `session.configuration` stays non-nil after the first
+    /// visit and can't tell us whether we still need to start one.
+    private var hasStartedSession = false
+
+    /// Bumped whenever placed content is cleared. A model load that finishes
+    /// after its session was reset carries a stale generation and is dropped,
+    /// otherwise it would re-add a dead anchor next to the fresh placement.
+    private var placementGeneration = 0
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -200,7 +234,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
             if let last = self.locationManager.location {
                 self.userLocation = last
                 self.statusMessage = "Using your last known location"
-                if self.arView?.session.configuration == nil { self.chooseTrackingMode() }
+                if !self.hasStartedSession { self.chooseTrackingMode() }
             } else {
                 self.statusMessage = "Couldn't get your location. Check you're outdoors with a clear sky, then retry."
                 self.showRetry = true
@@ -215,7 +249,9 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         case .authorizedAlways, .authorizedWhenInUse:
             permissionDenied = false
             statusMessage = "Finding your location"
+            manager.desiredAccuracy = kCLLocationAccuracyBest
             manager.startUpdatingLocation()
+            manager.startUpdatingHeading()
             armNoFixFallback()
         case .denied, .restricted:
             statusMessage = "Location access is off. Turn it on in Settings to place and see AR here."
@@ -236,9 +272,10 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         userLocation = loc
         noFixTask?.cancel()      // we have a fix now
         showRetry = false
+        updateFinder()
 
         // Kick off tracking once, as soon as we have a first fix and no session.
-        if !isLocalized && arView?.session.configuration == nil {
+        if !isLocalized && !hasStartedSession {
             statusMessage = "Location found. Checking AR support"
             chooseTrackingMode()
         }
@@ -247,6 +284,16 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         // session restart. placedIds prevents re-placing what's already up. (WS3)
         if isLocalized, let origin = lastFetchOrigin, loc.distance(from: origin) > refetchDistanceMeters {
             lastFetchOrigin = loc
+            reanchorWorldOrigin()
+            Task {
+                await fetchNearbyAssets()
+                placeAllAssets()
+            }
+        } else if isLocalized, lastFetchOrigin == nil,
+                  Date().timeIntervalSince(lastFailedFetchRetry) > 20 {
+            // The first fetch failed (lastFetchOrigin is only set on success),
+            // so the walk trigger above could never fire. Retry, throttled.
+            lastFailedFetchRetry = Date()
             Task {
                 await fetchNearbyAssets()
                 placeAllAssets()
@@ -267,18 +314,51 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
 
         statusMessage = "Checking AR availability here"
 
+        // The availability callback arrives on a background queue.
         ARGeoTrackingConfiguration.checkAvailability { [weak self] available, error in
-            guard let self = self else { return }
+            Task { @MainActor in
+                guard let self else { return }
 
-            if error != nil || !available {
-                // Supported hardware, but no geo data for this area → GPS mode.
-                self.statusMessage = "Using GPS mode"
-                self.startWorldTrackingSession()
+                self.geoAvailableHere = error == nil && available
+                if !self.geoAvailableHere {
+                    // Supported hardware, but no geo data for this area → GPS mode.
+                    self.statusMessage = "Using GPS mode"
+                    self.startWorldTrackingSession()
+                    return
+                }
+
+                if self.prefersGPSMode {
+                    self.statusMessage = "Using GPS mode (your choice)"
+                    self.startWorldTrackingSession()
+                    return
+                }
+
+                self.startGeoTrackingSession()
+            }
+        }
+    }
+
+
+    // MARK: Manual mode switch
+    /// - Description: Lets the user override the automatic choice, e.g. when
+    /// geo-localization keeps failing under trees or GPS mode is jittery. The
+    /// choice is remembered for next time.
+    func toggleTrackingMode() {
+        switch trackingMode {
+        case .geo:
+            prefersGPSMode = true
+            statusMessage = "Switched to GPS mode"
+            startWorldTrackingSession()
+        case .world:
+            guard geoAvailableHere else {
+                statusMessage = "Geo-anchoring isn't available here"
                 return
             }
-
-            self.startGeoTrackingSession()
+            prefersGPSMode = false
+            statusMessage = "Switching to geo-anchoring"
+            startGeoTrackingSession()
         }
+        ARHaptics.tick()
     }
 
 
@@ -289,7 +369,12 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         guard let arView = arView else { return }
 
         cancellables.removeAll()
+        hasStartedSession = true
         trackingMode = .geo
+        // `.removeExistingAnchors` below drops every geo anchor, so forget the
+        // placements too; `.localized` then re-fetches and re-places.
+        isLocalized = false
+        clearPlacedContent()
 
         let config = ARGeoTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
@@ -327,10 +412,12 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
 
         geoFallbackTask?.cancel()
         cancellables.removeAll()
+        hasStartedSession = true
         trackingMode = .world
         isLocalized = false
-        placedIds.removeAll()
+        clearPlacedContent()
         worldOriginLocation = nil
+        worldOriginCameraOffset = .zero
 
         let config = ARWorldTrackingConfiguration()
         config.worldAlignment = .gravityAndHeading
@@ -392,19 +479,47 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
     func resetARState() {
         geoFallbackTask?.cancel()
         noFixTask?.cancel()
+        hasStartedSession = false
         userLocation = nil
         isLocalized = false
         trackingMode = .geo
         nearbyAssets = []
-        placedIds.removeAll()
+        clearPlacedContent()
         worldOriginLocation = nil
+        worldOriginCameraOffset = .zero
+        geoAvailableHere = false
         lastFetchOrigin = nil
         modelLoadTokens.removeAll()
         inFlightDownloads.removeAll()
         permissionDenied = false
         showRetry = false
-        triggerEngine.teardown()
+        finderTrend = .steady
+        finderLastDistance = nil
+        finderLastTargetId = nil
+        justFound = nil
         statusMessage = "Finding location"
+    }
+
+    // MARK: Snapshot
+    /// Captures the camera feed with the placed AR content composited in.
+    func captureSnapshot() async -> UIImage? {
+        guard let arView else { return nil }
+        return await withCheckedContinuation { continuation in
+            arView.snapshot(saveToHDR: false) { image in
+                continuation.resume(returning: image)
+            }
+        }
+    }
+
+    /// - Description: Removes every placed model from the scene and forgets
+    /// what was placed. The ARView is a long-lived singleton, so without this
+    /// each re-entry (or session re-run) stacks another copy of every asset.
+    private func clearPlacedContent() {
+        arView?.scene.anchors.removeAll()
+        placedIds.removeAll()
+        worldAnchors.removeAll()
+        placementGeneration += 1
+        triggerEngine.teardown()
     }
 
 
@@ -484,6 +599,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
     // MARK: Fetch assets from RPC
     /// - Description: Calls get_nearby_assets_full to load assets near the user.
     func fetchNearbyAssets(radiusMeters: Double = 200) async {
+        lastFailedFetchRetry = Date()
         guard let loc = userLocation else {
             statusMessage = "No location"
             return
@@ -502,11 +618,15 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
                 .execute()
                 .value
 
-            nearbyAssets = assets
+            // Only USDZ models can be placed (photo assets share the table),
+            // and blocked/reported content never enters the scene.
+            let placeable = assets.filter { $0.fileType.lowercased() == "usdz" }
+            nearbyAssets = SafetyService.shared.visible(placeable)
             lastFetchOrigin = loc     // anchor for walk-based re-fetch (WS3)
-            statusMessage = assets.isEmpty
+            let count = nearbyAssets.count
+            statusMessage = count == 0
                 ? "No AR assets nearby yet"
-                : "Loaded \(assets.count) asset\(assets.count == 1 ? "" : "s")"
+                : "Loaded \(count) asset\(count == 1 ? "" : "s")"
 
         } catch {
             statusMessage = "Failed to load assets"
@@ -581,9 +701,11 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         let geoAnchor = ARGeoAnchor(name: asset.name ?? "", coordinate: coord, altitude: altitude)
         arView.session.add(anchor: geoAnchor)
         let anchorEntity = AnchorEntity(anchor: geoAnchor)
+        let generation = placementGeneration
 
         loadModel(for: asset) { [weak self] entity in
-            guard let self, let arView = self.arView else { return }
+            guard let self, let arView = self.arView,
+                  generation == self.placementGeneration else { return }
             anchorEntity.addChild(entity)
             arView.scene.addAnchor(anchorEntity)
             self.finishPlacement(of: asset, entity: entity)
@@ -598,12 +720,35 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
     /// aligned world (so -Z is north, +X is east).
     func placeAssetWorld(_ asset: DigitalAsset, in arView: ARView) {
         if placedIds.contains(asset.id) { return }
+        guard let transform = worldTransform(for: asset) else { return }
 
+        #if targetEnvironment(simulator)
+        return
+        #else
+        placedIds.insert(asset.id)
+        let anchorEntity = AnchorEntity(world: transform)
+        let generation = placementGeneration
+
+        loadModel(for: asset) { [weak self] entity in
+            guard let self, let arView = self.arView,
+                  generation == self.placementGeneration else { return }
+            anchorEntity.addChild(entity)
+            arView.scene.addAnchor(anchorEntity)
+            self.worldAnchors[asset.id] = (anchorEntity, asset)
+            self.finishPlacement(of: asset, entity: entity)
+        }
+        #endif
+    }
+
+    /// - Description: World-space transform for an asset in GPS mode: its
+    /// east/north/up offset from `worldOriginLocation`, shifted by the camera
+    /// position that location was captured at. Nil if out of trusted range.
+    private func worldTransform(for asset: DigitalAsset) -> simd_float4x4? {
         guard
             let lat = asset.latitude,
             let lon = asset.longitude,
             let origin = worldOriginLocation
-        else { return }
+        else { return nil }
 
         let assetCoord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
         let assetGround = CLLocation(latitude: lat, longitude: lon)
@@ -613,7 +758,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         let distance = originGround.distance(from: assetGround) // horizontal meters
         guard distance <= maxWorldPlacementMeters else {
             print("Skipping \(asset.name ?? "asset"): \(Int(distance)) m out of range")
-            return
+            return nil
         }
 
         let bearing = bearing(from: origin.coordinate, to: assetCoord) // radians CW from north
@@ -625,21 +770,37 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         let y = Float(altitude - origin.altitude)
 
         var transform = matrix_identity_float4x4
-        transform.columns.3 = SIMD4<Float>(x, y, z, 1)
+        transform.columns.3 = SIMD4<Float>(x + worldOriginCameraOffset.x,
+                                           y + worldOriginCameraOffset.y,
+                                           z + worldOriginCameraOffset.z, 1)
+        return transform
+    }
 
-        #if targetEnvironment(simulator)
-        return
-        #else
-        placedIds.insert(asset.id)
-        let anchorEntity = AnchorEntity(world: transform)
+    // MARK: GPS-mode re-anchoring
+    /// - Description: World tracking drifts and the session-start GPS fix
+    /// carries its own error, so after a long walk everything sits metres off.
+    /// With a good fix, re-base the origin on the camera's current position
+    /// and move already-placed anchors; ones now out of range are dropped.
+    private func reanchorWorldOrigin() {
+        guard trackingMode == .world, isLocalized,
+              let loc = userLocation,
+              loc.horizontalAccuracy > 0, loc.horizontalAccuracy <= reanchorMaxAccuracyMeters,
+              let cam = arView?.session.currentFrame?.camera.transform
+        else { return }
 
-        loadModel(for: asset) { [weak self] entity in
-            guard let self, let arView = self.arView else { return }
-            anchorEntity.addChild(entity)
-            arView.scene.addAnchor(anchorEntity)
-            self.finishPlacement(of: asset, entity: entity)
+        worldOriginLocation = loc
+        worldOriginCameraOffset = SIMD3<Float>(cam.columns.3.x, cam.columns.3.y, cam.columns.3.z)
+
+        for (id, placed) in worldAnchors {
+            if let transform = worldTransform(for: placed.asset) {
+                placed.anchor.anchoring = AnchoringComponent(.world(transform: transform))
+                placed.anchor.setTransformMatrix(transform, relativeTo: nil)
+            } else {
+                placed.anchor.removeFromParent()
+                worldAnchors[id] = nil
+                placedIds.remove(id)
+            }
         }
-        #endif
     }
 
 
@@ -726,9 +887,14 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         if let qx = asset.rotQX, let qy = asset.rotQY, let qz = asset.rotQZ, let qw = asset.rotQW {
             entity.orientation = simd_quatf(ix: Float(qx), iy: Float(qy), iz: Float(qz), r: Float(qw))
         } else {
-            let rx = Float(asset.rotationX ?? 0) * .pi / 180
-            let ry = Float(asset.rotationY ?? 0) * .pi / 180
-            let rz = Float(asset.rotationZ ?? 0) * .pi / 180
+            // Only pre-WS2 rows reach this branch, and those stored RADIANS
+            // (prod rows hold ±π). Post-WS2 rows write degrees but always carry
+            // a quaternion; the magnitude check covers any degree-valued stragglers.
+            let raw = [asset.rotationX ?? 0, asset.rotationY ?? 0, asset.rotationZ ?? 0]
+            let toRadians: Double = raw.allSatisfy { abs($0) <= 2 * .pi + 0.01 } ? 1 : .pi / 180
+            let rx = Float(raw[0] * toRadians)
+            let ry = Float(raw[1] * toRadians)
+            let rz = Float(raw[2] * toRadians)
 
             let rotX = simd_quatf(angle: rx, axis: [1, 0, 0])
             let rotY = simd_quatf(angle: ry, axis: [0, 1, 0])
@@ -772,7 +938,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
 
     /// - Description: Initial bearing from one coordinate to another, in
     /// radians measured clockwise from true north.
-    private func bearing(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) -> Double {
+    func bearing(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) -> Double {
         let lat1 = from.latitude * .pi / 180
         let lon1 = from.longitude * .pi / 180
         let lat2 = to.latitude * .pi / 180

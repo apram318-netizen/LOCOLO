@@ -20,11 +20,14 @@ final class DigitalAssetRepository {
 
     // MARK: FUNCTION: fetchAll
     /// - Description: Loads all digital assets, using cache first if available.
-    /// - Parameter limit: Optional cap on how many assets to load
+    /// - Parameters:
+    ///   - limit: Optional cap on how many assets to load
+    ///   - forceRefresh: Skip the cache and hit the network (pull-to-refresh).
+    ///     Falls back to the cache if the network call fails.
     /// - Returns: A list of `DigitalAsset` objects
-    func fetchAll(limit: Int? = nil) async -> [DigitalAsset] {
+    func fetchAll(limit: Int? = nil, forceRefresh: Bool = false) async -> [DigitalAsset] {
         let cached = cacheStore.fetchDigitalAssets(limit: limit)
-        if !cached.isEmpty {
+        if !cached.isEmpty && !forceRefresh {
             return cached
         }
 
@@ -48,12 +51,28 @@ final class DigitalAssetRepository {
             
         } catch {
             print(" fetchAll failed:", error)
-            return []
+            return cached
         }
     }
     
     
     
+
+    // MARK: FUNCTION: fetchAsset
+    /// - Description: Fetches one asset by id (full 41-column shape, including
+    /// location/rotation) via the get_asset_full RPC. Used by deep links. (WS7.4)
+    func fetchAsset(id: UUID) async -> DigitalAsset? {
+        do {
+            let rows: [DigitalAsset] = try await client
+                .rpc("get_asset_full", params: ["p_asset_id": id.uuidString])
+                .execute()
+                .value
+            return rows.first
+        } catch {
+            print(" fetchAsset failed:", error)
+            return nil
+        }
+    }
 
     // MARK: FUNCTION: fetchByUser
     /// - Description: Fetches all digital assets owned by a given user.
@@ -147,8 +166,8 @@ final class DigitalAssetRepository {
     func updateOfferStatus(offerId: UUID, status: String) async throws {
         try await client
             .from("offers")
-            .update(["status": status])
-            .eq("id", value: offerId)
+            .update(["status": status], returning: .minimal)
+            .eq("offer_id", value: offerId)
             .execute()
     }
     

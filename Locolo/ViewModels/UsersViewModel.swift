@@ -87,7 +87,15 @@ class UserViewModel: ObservableObject {
     /// Also inserts a matching user record in Supabase `users` table.
     func signUp(email: String, password: String, username: String) async -> Bool {
         do {
-            let authRes = try await client.auth.signUp(email: email, password: password)
+            // Username rides along as auth metadata so the handle_new_user
+            // trigger (safety migration) can create the profile row even
+            // when RLS refuses the client insert below (no session until the
+            // email is confirmed).
+            let authRes = try await client.auth.signUp(
+                email: email,
+                password: password,
+                data: ["username": .string(username)]
+            )
 
              let supaUser = authRes.user
             // Insert user row in your table immediately
@@ -104,7 +112,13 @@ class UserViewModel: ObservableObject {
                 stats: ["followers": 0, "following": 0, "posts": 0]
             )
 
-            try await userRepository.createUser(newUser)
+            do {
+                try await userRepository.createUser(newUser)
+            } catch let error as PostgrestError where error.code == "23505" || error.code == "42501" {
+                // 23505: the trigger already created the row.
+                // 42501: RLS refused the pre-confirmation insert; the trigger owns it.
+                print("Profile row left to handle_new_user:", error.message)
+            }
 
             return true
         } catch {
@@ -127,8 +141,9 @@ class UserViewModel: ObservableObject {
             // Refresh session so email_confirmed_at updates
             let _ = try await client.auth.session
 
-            // Load the user's profile from DB
-            if let user = try await getUser(byEmail: email) {
+            // Load the user's profile by auth id (email lookups are private).
+            let session = try await client.auth.session
+            if let user = try await userRepository.getUser(by: session.user.id) {
                 await MainActor.run {
                     self.currentUser = user
                     self.isAuthenticated = true
@@ -174,32 +189,28 @@ class UserViewModel: ObservableObject {
     
     // MARK: - Logout
     /// Logs out the user and clears local session data.
+    ///
+    /// Local state is always cleared, even if the server call fails: after
+    /// account deletion the session is already invalid, and leaving the user
+    /// "signed in" to a deleted account is worse than a stale refresh token.
     func logout() async {
         do {
             try await client.auth.signOut()
-
-            // Clear auth state
-            currentUser = nil
-            SupabaseManager.shared.currentUserId = nil
-            isAuthenticated = false
-            
-            // Clear location session
-            LocationManager.shared.stopTracking()
-
-            // Clear cached CoreData
-            CacheStore.shared.clearAllCache()
-
-            // Clear MediaCache files
-            MediaCache.shared.clear()
-
-            // Clear UserDefaults
-            clearAllUserDefaults()
-
-            print(" FULL LOGOUT CLEANUP COMPLETE")
-
         } catch {
-            errorMessage = error.localizedDescription
+            print(" Supabase signOut failed, clearing local session anyway:", error.localizedDescription)
+            try? await client.auth.signOut(scope: .local)
         }
+
+        currentUser = nil
+        SupabaseManager.shared.currentUserId = nil
+        isAuthenticated = false
+
+        LocationManager.shared.stopTracking()
+        CacheStore.shared.clearAllCache()
+        MediaCache.shared.clear()
+        clearAllUserDefaults()
+
+        print(" FULL LOGOUT CLEANUP COMPLETE")
     }
 
     
@@ -348,6 +359,16 @@ class UserViewModel: ObservableObject {
     }
     
     func doesUserExist(email: String) async -> Bool {
+        // Preferred: a boolean-only RPC (safety migration) — anon can't read
+        // the users table once RLS is on. Falls back to the legacy query
+        // until that migration is applied.
+        struct Params: Encodable { let p_email: String }
+        if let exists: Bool = try? await client
+            .rpc("email_registered", params: Params(p_email: email.lowercased()))
+            .execute()
+            .value {
+            return exists
+        }
         do {
             let users: [ExistingUserLookup] = try await client
                 .from("users")
@@ -387,7 +408,7 @@ class UserViewModel: ObservableObject {
         
         let response: [User] = try await client
             .from("users")
-            .select()
+            .select(User.publicColumns)
             .eq("email", value: normalized)
             .limit(1)
             .execute()

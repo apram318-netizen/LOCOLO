@@ -51,24 +51,50 @@ struct ARDrawView: UIViewRepresentable {
         var drawDepth: Float = 0.4
 
         private let handTracker = HandTracker()
-        private var frameCount = 0
+        /// Vision is too slow for the main thread; one frame in flight at a
+        /// time so we never queue up (and retain) stale camera buffers.
+        private let visionQueue = DispatchQueue(label: "com.locolo.draw.vision", qos: .userInteractive)
+        private var isProcessing = false
+        /// Consecutive frames without a confident hand while pinching.
+        private var missedFrames = 0
+        private let maxMissedFrames = 6
 
         init(vm: ARDrawViewModel) { self.vm = vm }
 
         // MARK: Vision hand tracking
 
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
-            frameCount += 1
-            guard frameCount % 2 == 0 else { return }   // throttle to every other frame
+            // No delegateQueue is set, so ARKit calls us on the main thread.
+            let wantsHands = MainActor.assumeIsolated { vm.useHandTracking }
+            guard wantsHands, !isProcessing else { return }
+            isProcessing = true
 
             let pixelBuffer = frame.capturedImage
-            guard let result = handTracker.process(pixelBuffer: pixelBuffer) else { return }
-
-            Task { @MainActor in
-                guard self.vm.useHandTracking else { return }   // main-actor read
-                self.handleInput(normalizedPoint: result.indexTip,
-                                 isActive: result.isPinching,
-                                 changed: result.pinchChanged)
+            visionQueue.async { [weak self] in
+                guard let self else { return }
+                let result = self.handTracker.process(pixelBuffer: pixelBuffer)
+                let pinchingBeforeLoss = self.handTracker.isPinching
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        self.isProcessing = false
+                        guard self.vm.useHandTracking else { return }
+                        if let result {
+                            self.missedFrames = 0
+                            self.handleInput(normalizedPoint: result.indexTip,
+                                             isActive: result.isPinching,
+                                             changed: result.pinchChanged)
+                        } else if pinchingBeforeLoss {
+                            // Hand left the frame mid-stroke: close the stroke
+                            // instead of leaving it dangling open.
+                            self.missedFrames += 1
+                            if self.missedFrames >= self.maxMissedFrames {
+                                self.missedFrames = 0
+                                self.visionQueue.async { self.handTracker.reset() }
+                                self.vm.endStroke()
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -97,8 +123,9 @@ struct ARDrawView: UIViewRepresentable {
             if changed {
                 if isActive { vm.beginStroke() } else { vm.endStroke() }
             }
-            guard isActive else { return }
-            let screen = screenPoint(fromVisionNormalized: normalizedPoint, viewSize: view.bounds.size)
+            guard isActive,
+                  let screen = screenPoint(fromVisionNormalized: normalizedPoint, in: view)
+            else { return }
             addProjectedPoint(screenPoint: screen)
         }
 
@@ -126,14 +153,21 @@ struct ARDrawView: UIViewRepresentable {
             return .zero
         }
 
-        /// Maps a Vision normalized point (origin bottom-left, camera oriented
-        /// `.right`) to ARView coordinates. Approximate — tune on device.
-        private func screenPoint(fromVisionNormalized p: CGPoint, viewSize: CGSize) -> CGPoint {
-            // For a back camera in portrait (.right), Vision's x maps to vertical
-            // and y to horizontal; y is flipped for UIKit's top-left origin.
-            let x = p.y * viewSize.width
-            let y = p.x * viewSize.height
-            return CGPoint(x: x, y: y)
+        /// Maps a Vision point to ARView coordinates.
+        ///
+        /// Vision ran with orientation `.right`, so `p` is normalized in the
+        /// upright (portrait) image with a bottom-left origin. Undo that to get
+        /// normalized coordinates in the raw landscape capture (top-left origin),
+        /// then let ARKit's display transform apply the rotation and the
+        /// aspect-fill crop the ARView uses on screen.
+        @MainActor
+        private func screenPoint(fromVisionNormalized p: CGPoint, in view: ARView) -> CGPoint? {
+            guard let frame = view.session.currentFrame else { return nil }
+            let size = view.bounds.size
+            let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
+            let raw = CGPoint(x: 1 - p.y, y: 1 - p.x)
+            let normalized = raw.applying(frame.displayTransform(for: orientation, viewportSize: size))
+            return CGPoint(x: normalized.x * size.width, y: normalized.y * size.height)
         }
     }
 }

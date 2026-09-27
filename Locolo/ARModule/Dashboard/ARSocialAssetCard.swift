@@ -148,8 +148,8 @@ struct ARSocialAssetCard: View {
                         .background(Capsule().fill(Color.black.opacity(0.45)))
                 }
 
-                if let cat = asset.category {
-                    Text(cat.capitalized)
+                if let cat = asset.categoryLabel {
+                    Text(cat)
                         .font(.caption2.weight(.semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 8)

@@ -8,6 +8,7 @@
 
 import SwiftUI
 import Foundation
+import Combine
 
 @MainActor
 final class ARGalleryViewModel: ObservableObject {
@@ -50,6 +51,12 @@ final class ARGalleryViewModel: ObservableObject {
 
     private let repo = DigitalAssetRepository()
     private let client = SupabaseManager.shared.client
+    private var safetyObserver: AnyCancellable?
+
+    init() {
+        safetyObserver = SafetyService.shared.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+    }
 
     var hasActiveFilters: Bool {
         selectedCategory != "all" || onlyForSale || onlyAcceptsOffers
@@ -59,17 +66,17 @@ final class ARGalleryViewModel: ObservableObject {
 
     /// Search text + category + marketplace filters + sort, in that order.
     var filteredArtworks: [DigitalAsset] {
-        let filtered = artworks.filter { art in
+        let filtered = SafetyService.shared.visible(artworks).filter { art in
             let matchesSearch =
                 searchQuery.isEmpty ||
                 (art.name ?? "").localizedCaseInsensitiveContains(searchQuery) ||
                 (art.description ?? "").localizedCaseInsensitiveContains(searchQuery) ||
-                (art.category ?? "").localizedCaseInsensitiveContains(searchQuery) ||
+                (art.normalizedCategory ?? "").localizedCaseInsensitiveContains(searchQuery) ||
                 (art.displayLocation ?? "").localizedCaseInsensitiveContains(searchQuery)
 
             let matchesCategory =
                 selectedCategory == "all" ||
-                (art.category?.lowercased() == selectedCategory.lowercased())
+                ((art.normalizedCategory ?? "other") == selectedCategory.lowercased())
 
             let matchesSale = !onlyForSale || art.isForSale == true
             let matchesOffers = !onlyAcceptsOffers || art.acceptsOffers == true
@@ -97,7 +104,7 @@ final class ARGalleryViewModel: ObservableObject {
     var categoryCounts: [(category: String, count: Int)] {
         var counts: [String: Int] = [:]
         for art in artworks {
-            let cat = (art.category ?? "other").lowercased()
+            let cat = art.normalizedCategory ?? "other"
             counts[cat, default: 0] += 1
         }
         return counts.sorted { $0.value > $1.value }
@@ -123,7 +130,15 @@ final class ARGalleryViewModel: ObservableObject {
 
     func loadArtworks() async {
         isLoading = artworks.isEmpty
-        artworks = await repo.fetchAll()
+        let cached = await repo.fetchAll()
+        if !cached.isEmpty { artworks = cached }
+        isLoading = false
+        await refreshArtworks()
+    }
+
+    func refreshArtworks() async {
+        let fresh = await repo.fetchAll(forceRefresh: true)
+        if !fresh.isEmpty { artworks = fresh }
         errorMessage = nil
         isLoading = false
     }
@@ -156,16 +171,12 @@ final class ARGalleryViewModel: ObservableObject {
         else { return }
 
         isDeepSearching = true
+        semanticResults = []
         defer { isDeepSearching = false }
 
         do {
             // 1) Embed the query text.
-            var request = URLRequest(url: URL(string: "\(Secrets.supabaseURL)/functions/v1/embed-query")!)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-            request.httpBody = try JSONEncoder().encode(["q": query])
-
+            let request = try await EdgeFunctions.request("embed-query", body: ["q": query])
             let (data, response) = try await URLSession.shared.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else {
                 semanticResults = []   // function not deployed yet — keyword only
@@ -187,7 +198,9 @@ final class ARGalleryViewModel: ObservableObject {
                 .execute()
                 .value
 
-            semanticResults = results
+            // The user may have kept typing while this was in flight.
+            guard query == searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+            semanticResults = SafetyService.shared.visible(results)
         } catch {
             semanticResults = []
             print("Deep search unavailable:", error.localizedDescription)

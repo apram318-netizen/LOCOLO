@@ -56,6 +56,14 @@ enum ARHaptics {
     static func success() {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
+
+    static func warning() {
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+    }
+
+    static func pulse(intensity: CGFloat) {
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: max(0.1, min(1, intensity)))
+    }
 }
 
 // MARK: - Glass card
@@ -302,5 +310,27 @@ extension DigitalAsset {
         if let address, !address.isEmpty { return address }
         if let locationName, !locationName.isEmpty { return locationName }
         return nil
+    }
+
+    /// Lowercased category on the canonical taxonomy (art/photo/3d/audio/other).
+    /// Assets created before the taxonomy fix were saved as "ar_model"; they are
+    /// 3D models and must filter/chart as such.
+    var normalizedCategory: String? {
+        guard let raw = category?.lowercased(), !raw.isEmpty else { return nil }
+        switch raw {
+        case "ar_model", "model", "usdz": return "3d"
+        default: return raw
+        }
+    }
+
+    var categoryLabel: String? {
+        normalizedCategory?.capitalized
+    }
+
+    /// Creation writes public / private / friends; legacy rows say "normal"
+    /// (an old rarity value), which behaves as public.
+    var normalizedVisibility: String {
+        let raw = visibility.lowercased()
+        return raw == "normal" || raw.isEmpty ? "public" : raw
     }
 }

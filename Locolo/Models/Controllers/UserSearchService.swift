@@ -26,7 +26,7 @@ final class UserSearchService {
         do {
             let response = try await client
                 .from("users")
-                .select("user_id, username, email, name, avatar_url") // pick only what we need
+                .select("user_id, username, name, avatar_url")        // never email (private)
                 .ilike("username", pattern: "%\(keyword)%")          // case-insensitive match
                 .neq("user_id", value: excludeUserId)                // skip current user
                 .execute()

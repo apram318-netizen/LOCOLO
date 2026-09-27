@@ -6,8 +6,18 @@
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>Location</string>
 		<string>location</string>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.locolo.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>locolo</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

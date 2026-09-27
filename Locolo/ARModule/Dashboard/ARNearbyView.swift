@@ -15,6 +15,7 @@ struct ARNearbyView: View {
     var onDismiss: (() -> Void)? = nil
 
     @StateObject private var vm = MapViewModel()
+    @ObservedObject private var safety = SafetyService.shared
     @EnvironmentObject private var dashboardState: ARDashboardState
 
     @State private var detailAsset: DigitalAsset?
@@ -31,9 +32,9 @@ struct ARNearbyView: View {
 
     private var visibleAssets: [DigitalAsset] {
         vm.assets.filter { asset in
-            guard asset.latitude != nil, asset.longitude != nil else { return false }
+            guard asset.latitude != nil, asset.longitude != nil, !safety.isHidden(asset) else { return false }
             return categoryFilter == "all"
-                || asset.category?.lowercased() == categoryFilter
+                || asset.normalizedCategory == categoryFilter
         }
     }
 
@@ -246,8 +247,8 @@ struct ARNearbyView: View {
                         .foregroundColor(.primary)
                         .lineLimit(1)
 
-                    if let cat = asset.category {
-                        Text(cat.capitalized)
+                    if let cat = asset.categoryLabel {
+                        Text(cat)
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }

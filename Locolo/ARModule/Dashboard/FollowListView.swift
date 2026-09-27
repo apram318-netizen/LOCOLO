@@ -18,6 +18,7 @@ struct FollowListView: View {
     @State private var followers: [ARCreator] = []
     @State private var following: [ARCreator] = []
     @State private var isLoading = true
+    @State private var loadFailed = false
 
     private let repo = FollowRepository()
 
@@ -37,6 +38,16 @@ struct FollowListView: View {
 
                 if isLoading {
                     ProgressView().tint(.purple).frame(maxHeight: .infinity)
+                } else if loadFailed && rows.isEmpty {
+                    ARInlineEmptyState(
+                        icon: "wifi.exclamationmark",
+                        title: "Couldn't load connections",
+                        subtitle: "Check your connection and try again.",
+                        actionTitle: "Retry",
+                        action: { Task { await load() } }
+                    )
+                    .frame(maxHeight: .infinity)
+                    .padding(.horizontal, 16)
                 } else if rows.isEmpty {
                     emptyState
                 } else {
@@ -133,8 +144,11 @@ struct FollowListView: View {
         isLoading = true
         async let f = repo.followers(of: userId)
         async let g = repo.following(of: userId)
-        followers = (try? await f) ?? []
-        following = (try? await g) ?? []
+        let loadedFollowers = try? await f
+        let loadedFollowing = try? await g
+        followers = loadedFollowers ?? []
+        following = loadedFollowing ?? []
+        loadFailed = loadedFollowers == nil || loadedFollowing == nil
         isLoading = false
     }
 }

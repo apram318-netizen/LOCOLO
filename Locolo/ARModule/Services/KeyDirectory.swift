@@ -31,7 +31,10 @@ final class KeyDirectory {
     /// Publish (or refresh) this user's public key. Idempotent — safe to call
     /// on every launch; only writes if the stored key differs.
     func publishMyKey(userId: UUID) async {
-        let mine = CryptoService.shared.myPublicKeyBase64
+        guard let mine = CryptoService.shared.myPublicKeyBase64 else {
+            print("KeyDirectory.publishMyKey skipped: Keychain unavailable")
+            return
+        }
         if let existing = await publicKey(for: userId), existing == mine { return }
 
         do {
@@ -40,7 +43,7 @@ final class KeyDirectory {
                 .update(KeyUpsert(
                     x25519_public_key: mine,
                     key_updated_at: ISO8601DateFormatter().string(from: Date())
-                ))
+                ), returning: .minimal)   // users.email isn't selectable
                 .eq("user_id", value: userId)
                 .execute()
             cache[userId] = mine

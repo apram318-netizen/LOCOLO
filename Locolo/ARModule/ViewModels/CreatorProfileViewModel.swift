@@ -10,12 +10,36 @@
 import Foundation
 import Supabase
 
+/// Where one of the creator's assets sits in the world, for the profile map.
+struct AssetPlacementPin: Identifiable {
+    let id: UUID
+    let name: String?
+    let latitude: Double
+    let longitude: Double
+}
+
+private struct AssetPinRow: Decodable {
+    struct LocationEmbed: Decodable {
+        let latitude: Double?
+        let longitude: Double?
+    }
+    let asset_id: UUID
+    let name: String?
+    let locations: LocationEmbed?
+
+    var pin: AssetPlacementPin? {
+        guard let lat = locations?.latitude, let lon = locations?.longitude else { return nil }
+        return AssetPlacementPin(id: asset_id, name: name, latitude: lat, longitude: lon)
+    }
+}
+
 @MainActor
 final class CreatorProfileViewModel: ObservableObject {
     let userId: UUID
 
     @Published var user: User?
     @Published var assets: [DigitalAsset] = []
+    @Published var pins: [AssetPlacementPin] = []
     @Published var followers = 0
     @Published var following = 0
     @Published var isFollowing = false
@@ -52,7 +76,7 @@ final class CreatorProfileViewModel: ObservableObject {
         do {
             async let userRow: [User] = client
                 .from("users")
-                .select("*")
+                .select(User.publicColumns)
                 .eq("user_id", value: userId)
                 .limit(1)
                 .execute()
@@ -77,6 +101,15 @@ final class CreatorProfileViewModel: ObservableObject {
             if let me = meId, !isSelf {
                 isFollowing = (try? await follows.isFollowing(userId, from: me)) ?? false
             }
+
+            // Map is a nice-to-have: a failure here shouldn't fail the profile.
+            let pinRows: [AssetPinRow]? = try? await client
+                .from("digital_assets")
+                .select("asset_id, name, locations(latitude, longitude)")
+                .eq("user_id", value: userId)
+                .execute()
+                .value
+            pins = pinRows?.compactMap(\.pin) ?? []
         } catch {
             errorMessage = "Couldn't load this profile."
             print("CreatorProfile load failed:", error.localizedDescription)

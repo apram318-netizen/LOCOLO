@@ -26,8 +26,21 @@ final class MediaCache {
     /// - Parameters: remoteURL: URL - The remote URL of the media file.
     ///  - Returns: URL? - The local URL of the cached media file if it exists or nil.
     func localURL(forRemoteURL remoteURL: URL) -> URL? {
-        let fileURL = cacheDirectory.appendingPathComponent(key(for: remoteURL))
-        return fileManager.fileExists(atPath: fileURL.path) ? fileURL : nil
+        // `store` appends an extension (caller-supplied or the remote one), so
+        // look for the bare hash, then the remote extension, then any extension.
+        let bare = key(for: remoteURL)
+        var candidates = [bare]
+        if !remoteURL.pathExtension.isEmpty {
+            candidates.append(key(for: remoteURL, customExtension: remoteURL.pathExtension))
+        }
+        for name in candidates {
+            let fileURL = cacheDirectory.appendingPathComponent(name)
+            if fileManager.fileExists(atPath: fileURL.path) { return fileURL }
+        }
+        let prefix = bare + "."
+        let match = (try? fileManager.contentsOfDirectory(atPath: cacheDirectory.path))?
+            .first { $0.hasPrefix(prefix) }
+        return match.map { cacheDirectory.appendingPathComponent($0) }
     }
     
 
@@ -79,6 +92,15 @@ final class MediaCache {
     func clear() {
         try? fileManager.removeItem(at: cacheDirectory)
         createDirectoryIfNeeded()
+    }
+
+    /// Total bytes of cached media (models, thumbnails, avatars).
+    func diskUsage() -> Int64 {
+        let files = (try? fileManager.contentsOfDirectory(
+            at: cacheDirectory, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+        return files.reduce(0) { total, url in
+            total + Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
     }
 
     // MARK: - Helpers

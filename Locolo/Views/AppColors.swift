@@ -135,6 +135,20 @@ struct AppColors {
         endPoint: .bottomTrailing
     )
     
+    // MARK: - Visibility gradients
+    static func visibilityGradient(_ visibility: String) -> LinearGradient {
+        switch visibility.lowercased() {
+        case "private":
+            return LinearGradient(colors: [.gray, .gray.opacity(0.6)], startPoint: .leading, endPoint: .trailing)
+        case "friends":
+            return LinearGradient(colors: [.blue, .cyan], startPoint: .leading, endPoint: .trailing)
+        case "all":
+            return LinearGradient(colors: [.purple, .pink], startPoint: .leading, endPoint: .trailing)
+        default:
+            return LinearGradient(colors: [.green, .teal], startPoint: .leading, endPoint: .trailing)
+        }
+    }
+
     // MARK: - Rarity gradients
     static func rarityGradient(_ rarity: String) -> LinearGradient {
         switch rarity.lowercased() {

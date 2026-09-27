@@ -31,7 +31,7 @@ struct ArtworkCard: View {
                         .foregroundColor(AppColors.primaryText)
                         .lineLimit(1)
 
-                    Text(asset.category?.capitalized ?? "Uncategorized")
+                    Text(asset.categoryLabel ?? "Uncategorized")
                         .font(.subheadline)
                         .foregroundColor(AppColors.secondaryText)
                         .lineLimit(1)

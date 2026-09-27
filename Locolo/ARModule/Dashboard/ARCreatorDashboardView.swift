@@ -17,6 +17,16 @@ struct ARCreatorDashboardView: View {
     @EnvironmentObject var userVM: UserViewModel
     @EnvironmentObject private var dashboardState: ARDashboardState
     @StateObject private var vm = ARProfileViewModel()
+    @ObservedObject private var discoveries = DiscoveryStore.shared
+
+    private var passport: ExplorerPassport {
+        ExplorerPassport.build(
+            discoveries: discoveries.found.count,
+            explored: vm.exploredAssets.count,
+            ownAssets: vm.ownAssets,
+            activity: Array(discoveries.found.values) + vm.exploredDates
+        )
+    }
 
     @State private var selectedAsset: DigitalAsset?
     @State private var offersForAsset: DigitalAsset?
@@ -34,8 +44,13 @@ struct ARCreatorDashboardView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             ARGlassHeader(title: "Creator Studio", subtitle: "Your AR presence", onExit: onDismiss) {
-                ARHeaderIconButton(icon: "plus", label: "Create AR asset", prominent: true) {
-                    dashboardState.path.append(.create)
+                HStack(spacing: 8) {
+                    ARHeaderIconButton(icon: "gearshape", label: "Settings") {
+                        dashboardState.path.append(.settings)
+                    }
+                    ARHeaderIconButton(icon: "plus", label: "Create AR asset", prominent: true) {
+                        dashboardState.path.append(.create)
+                    }
                 }
             }
         }
@@ -59,6 +74,8 @@ struct ARCreatorDashboardView: View {
                         .foregroundColor(.red)
                         .padding(.horizontal, 16)
                 } else {
+                    ExplorerPassportCard(passport: passport)
+                        .padding(.horizontal, 16)
                     overviewSection
                     if !vm.ownAssets.isEmpty {
                         analyticsSection

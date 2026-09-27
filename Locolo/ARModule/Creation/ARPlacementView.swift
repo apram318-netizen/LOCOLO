@@ -16,7 +16,9 @@ struct ARPlacementView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> ARView {
         let arView = ARView(frame: .zero)
-        arView.automaticallyConfigureSession = true
+        // Must stay false: an automatic world config would drop the
+        // .gravityAndHeading alignment the saved quaternion depends on.
+        arView.automaticallyConfigureSession = false
 
         // --- Configure AR Session ---
         // North-aligned world so captured orientation is expressed relative to

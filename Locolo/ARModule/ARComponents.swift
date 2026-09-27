@@ -8,6 +8,37 @@
 
 import SwiftUI
 
+// MARK: - Avatar
+
+/// Circular avatar with a gradient initials fallback.
+struct ARAvatarView: View {
+    let url: URL?
+    let name: String
+    var size: CGFloat = 40
+
+    private var initials: String {
+        let parts = name.split(separator: " ").prefix(2)
+        let letters = parts.compactMap(\.first).map(String.init).joined()
+        return letters.isEmpty ? "?" : letters.uppercased()
+    }
+
+    var body: some View {
+        AsyncImage(url: url) { image in
+            image.resizable().scaledToFill()
+        } placeholder: {
+            ZStack {
+                LinearGradient(colors: [.purple, .pink], startPoint: .topLeading, endPoint: .bottomTrailing)
+                Text(initials)
+                    .font(.system(size: size * 0.38, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Branded wordmark
 
 /// The LOCOLO wordmark rendered in the brand gradient. Reused on the launch

@@ -15,6 +15,7 @@ struct DetailsStepView: View {
     let onDone: () -> Void
     @State private var showAddressSheet = false
     @State private var showMediaPicker = false
+    @State private var showShareSheet = false
 
     var body: some View {
         Form {
@@ -81,14 +82,21 @@ struct DetailsStepView: View {
                 }
             }
 
-            Section("Privacy") {
+            Section {
                 Picker("Visibility", selection: $vm.visibility) {
                     Text("Public").tag("public")
                     Text("Private").tag("private")
                     Text("Friends").tag("friends")
                 }
                 .pickerStyle(.segmented)
-                Toggle("Also make this a post", isOn: $vm.alsoMakePost)
+            } header: {
+                Text("Privacy")
+            } footer: {
+                switch vm.visibility {
+                case "private": Text("Only you can see this asset.")
+                case "friends": Text("Only people who follow you can see this asset.")
+                default:        Text("Anyone exploring nearby can find this asset.")
+                }
             }
 
             Section {
@@ -125,8 +133,35 @@ struct DetailsStepView: View {
             Button("Back to Gallery") {
                 onDone()
             }
+            if vm.savedAssetShareURL != nil {
+                Button("Share it") {
+                    showShareSheet = true
+                }
+            }
         } message: {
             Text("Your digital asset has been successfully uploaded and is now available in AR.")
         }
+        // Post-save share: a locolo:// deep link straight to the new asset. (WS7.4)
+        .sheet(isPresented: $showShareSheet, onDismiss: { onDone() }) {
+            if let url = vm.savedAssetShareURL {
+                ShareSheet(items: [
+                    "Check out \"\(vm.savedAssetName)\" in AR on Locolo!",
+                    url
+                ])
+                .presentationDetents([.medium])
+            }
+        }
     }
+}
+
+/// Thin UIKit share-sheet wrapper (ShareLink can't be presented imperatively
+/// from an alert action).
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

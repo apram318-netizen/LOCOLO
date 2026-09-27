@@ -18,7 +18,13 @@ import Security
 final class CryptoService {
     static let shared = CryptoService()
 
-    enum CryptoError: Error { case badPeerKey, sealFailed }
+    enum CryptoError: Error { case badPeerKey, sealFailed, keychainUnavailable(OSStatus) }
+
+    private enum KeychainRead {
+        case found(Data)
+        case missing
+        case failed(OSStatus)
+    }
 
     private let keychainAccount = "com.locolo.chat.x25519.identity"
     private let hkdfInfo = Data("locolo-chat-v1".utf8)
@@ -32,24 +38,48 @@ final class CryptoService {
 
     /// The device identity private key, created on first use and persisted in
     /// the Keychain (this-device-only, after-first-unlock).
-    private func privateKey() -> Curve25519.KeyAgreement.PrivateKey {
+    ///
+    /// A new key is only minted when the item is genuinely absent. Any other
+    /// Keychain failure (locked before first unlock, transient errors) throws:
+    /// regenerating would orphan every existing conversation and republish a
+    /// different public key.
+    private func privateKey() throws -> Curve25519.KeyAgreement.PrivateKey {
         if let cached = cachedPrivateKey { return cached }
 
-        if let data = loadKeychain(),
-           let key = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data) {
-            cachedPrivateKey = key
-            return key
+        switch loadKeychain() {
+        case .found(let data):
+            if let key = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data) {
+                cachedPrivateKey = key
+                return key
+            }
+        case .missing:
+            break
+        case .failed(let status):
+            throw CryptoError.keychainUnavailable(status)
         }
 
         let key = Curve25519.KeyAgreement.PrivateKey()
-        saveKeychain(key.rawRepresentation)
+        let status = saveKeychain(key.rawRepresentation)
+        guard status == errSecSuccess else { throw CryptoError.keychainUnavailable(status) }
         cachedPrivateKey = key
         return key
     }
 
-    /// Base64 raw public key to publish so others can encrypt to this device.
-    var myPublicKeyBase64: String {
-        privateKey().publicKey.rawRepresentation.base64EncodedString()
+    /// Base64 raw public key to publish so others can encrypt to this device,
+    /// or nil if the Keychain can't be read right now.
+    var myPublicKeyBase64: String? {
+        try? privateKey().publicKey.rawRepresentation.base64EncodedString()
+    }
+
+    /// Human-comparable fingerprint of a public key ("12345 67890 …"), so two
+    /// people can check in person that nobody swapped keys in the directory.
+    static func safetyCode(forPublicKeyBase64 base64: String) -> String {
+        guard let raw = Data(base64Encoded: base64) else { return "—" }
+        let digest = Array(SHA256.hash(data: raw))
+        return stride(from: 0, to: 20, by: 5).map { start -> String in
+            let chunk = digest[start..<start + 5].reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+            return String(format: "%05llu", chunk % 100_000)
+        }.joined(separator: " ")
     }
 
     // MARK: - Conversation key
@@ -65,6 +95,7 @@ final class CryptoService {
         }
         let peerKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: peerData)
         let shared = try privateKey().sharedSecretFromKeyAgreement(with: peerKey)
+
 
         let symmetric = shared.hkdfDerivedSymmetricKey(
             using: SHA256.self,
@@ -98,7 +129,8 @@ final class CryptoService {
 
     // MARK: - Keychain
 
-    private func saveKeychain(_ data: Data) {
+    @discardableResult
+    private func saveKeychain(_ data: Data) -> OSStatus {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: keychainAccount
@@ -108,10 +140,10 @@ final class CryptoService {
         var attrs = base
         attrs[kSecValueData as String] = data
         attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(attrs as CFDictionary, nil)
+        return SecItemAdd(attrs as CFDictionary, nil)
     }
 
-    private func loadKeychain() -> Data? {
+    private func loadKeychain() -> KeychainRead {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: keychainAccount,
@@ -119,7 +151,15 @@ final class CryptoService {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var out: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess else { return nil }
-        return out as? Data
+        let status = SecItemCopyMatching(query as CFDictionary, &out)
+        switch status {
+        case errSecSuccess:
+            guard let data = out as? Data else { return .failed(status) }
+            return .found(data)
+        case errSecItemNotFound:
+            return .missing
+        default:
+            return .failed(status)
+        }
     }
 }

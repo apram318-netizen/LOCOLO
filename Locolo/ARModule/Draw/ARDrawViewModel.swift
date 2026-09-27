@@ -17,17 +17,26 @@ import simd
 final class ARDrawViewModel: ObservableObject {
     @Published var strokeCount = 0
     @Published var isDrawing = false
-    @Published var useHandTracking = true
+    @Published var useHandTracking = true {
+        didSet { if isDrawing { endStroke() } }
+    }
     @Published var statusHint = "Pinch and move to draw"
 
     /// Stroke appearance.
-    var strokeRadius: Float = 0.01
-    var strokeColor: UIColor = UIColor(red: 0.55, green: 0.36, blue: 0.96, alpha: 1) // Locolo violet
+    @Published var strokeRadius: Float = 0.01
+    @Published var strokeColor: UIColor = UIColor(red: 0.55, green: 0.36, blue: 0.96, alpha: 1) // Locolo violet
+
+    /// Upper bound on total centerline points so the exported USDZ stays small.
+    static let maxTotalPoints = 6000
+    @Published private(set) var totalPoints = 0
+    var isNearPointCap: Bool { totalPoints > Self.maxTotalPoints * 9 / 10 }
 
     weak var arView: ARView?
 
     private var anchor: AnchorEntity?
     private var committedGeometries: [StrokeGeometry] = []
+    private var committedColors: [UIColor] = []
+    private var committedPointCounts: [Int] = []
     private var committedEntities: [ModelEntity] = []
     private var currentPoints: [SIMD3<Float>] = []
     private var previewEntity: ModelEntity?
@@ -56,8 +65,14 @@ final class ARDrawViewModel: ObservableObject {
     func addPoint(_ p: SIMD3<Float>) {
         // Skip near-duplicate points to bound density.
         if let last = currentPoints.last, simd_distance(last, p) < 0.004 { return }
+        guard totalPoints + currentPoints.count < Self.maxTotalPoints else {
+            statusHint = "Canvas full — finish or undo a stroke"
+            return
+        }
         currentPoints.append(p)
-        if currentPoints.count % 2 == 0 { updatePreview() }
+        // Rebuilding the whole tube is O(n); thin out preview updates on long strokes.
+        let every = currentPoints.count > 200 ? 6 : 2
+        if currentPoints.count % every == 0 { updatePreview() }
     }
 
     func endStroke() {
@@ -73,15 +88,22 @@ final class ARDrawViewModel: ObservableObject {
         anchor?.addChild(entity)
 
         committedGeometries.append(geo)
+        committedColors.append(strokeColor)
+        committedPointCounts.append(currentPoints.count)
         committedEntities.append(entity)
+        totalPoints += currentPoints.count
         strokeCount = committedEntities.count
-        statusHint = "Pinch to draw the next stroke"
+        statusHint = isNearPointCap
+            ? "Almost out of canvas — finish soon"
+            : "Pinch to draw the next stroke"
     }
 
     func undo() {
         guard let entity = committedEntities.popLast() else { return }
         entity.removeFromParent()
         committedGeometries.removeLast()
+        committedColors.removeLast()
+        totalPoints -= committedPointCounts.popLast() ?? 0
         strokeCount = committedEntities.count
         ARHaptics.tick()
     }
@@ -90,6 +112,9 @@ final class ARDrawViewModel: ObservableObject {
         committedEntities.forEach { $0.removeFromParent() }
         committedEntities.removeAll()
         committedGeometries.removeAll()
+        committedColors.removeAll()
+        committedPointCounts.removeAll()
+        totalPoints = 0
         clearPreview()
         currentPoints.removeAll()
         strokeCount = 0
@@ -118,9 +143,11 @@ final class ARDrawViewModel: ObservableObject {
 
     // MARK: Export
 
-    /// Merge all committed strokes and export to a temporary .usdz.
+    /// Export all committed strokes (each keeping its colour) to a temporary .usdz.
     func exportUSDZ() throws -> URL {
-        let merged = StrokeBuilder.merge(committedGeometries)
-        return try USDZExporter.export(merged, name: "locolo-drawing")
+        let strokes = zip(committedGeometries, committedColors).map {
+            USDZExporter.Stroke(geometry: $0, color: $1)
+        }
+        return try USDZExporter.export(strokes, name: "locolo-drawing")
     }
 }

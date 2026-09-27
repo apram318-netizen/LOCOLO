@@ -27,7 +27,7 @@ struct CollectionView: View {
             asset.name?.localizedCaseInsensitiveContains(searchQuery) == true ||
             asset.category?.localizedCaseInsensitiveContains(searchQuery) == true
             
-            let matchesFilter = filterBy == "all" || asset.visibility == filterBy
+            let matchesFilter = filterBy == "all" || asset.normalizedVisibility == filterBy
             return matchesSearch && matchesFilter
         }
     }
@@ -62,11 +62,11 @@ struct CollectionView: View {
             
             // MARK: Filter Buttons Section
             HStack {
-                ForEach(["all", "normal", "rare", "legendary"], id: \.self) { filter in
+                ForEach(["all", "public", "friends", "private"], id: \.self) { filter in
                     FilterButton(
                         title: filter,
                         isActive: filterBy == filter,
-                        gradient: AppColors.rarityGradient(filter),
+                        gradient: AppColors.visibilityGradient(filter),
                         action: { filterBy = filter }
                     )
                 }
@@ -148,18 +148,18 @@ struct CollectionCard: View {
                             .font(.headline)
                             .foregroundColor(AppColors.primaryText)
                         
-                        Text(asset.category ?? "Unknown Category")
+                        Text(asset.categoryLabel ?? "Unknown Category")
                             .font(.subheadline)
                             .foregroundColor(AppColors.secondaryText)
                     }
                     
                     Spacer()
                     
-                    Text(asset.visibility.capitalized)
+                    Text(asset.normalizedVisibility.capitalized)
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(AppColors.rarityGradient(asset.visibility))
+                        .background(AppColors.visibilityGradient(asset.normalizedVisibility))
                         .cornerRadius(12)
                         .foregroundColor(.white)
                 }

@@ -58,7 +58,7 @@ final class OfferRepository {
     func updateOfferStatus(offerId: UUID, status: String) async throws {
         try await client
             .from("offers")
-            .update(["status": status])
+            .update(["status": status], returning: .minimal)
             .eq("offer_id", value: offerId)
             .execute()
     }

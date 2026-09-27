@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import Combine
 import Supabase
 import CoreLocation
 
@@ -55,22 +56,36 @@ final class ARExploreViewModel: ObservableObject {
 
     private let repo = DigitalAssetRepository()
     private let client = SupabaseManager.shared.client
+    private var safetyObserver: AnyCancellable?
+
+    init() {
+        // Blocking/reporting must drop content from the feed immediately.
+        safetyObserver = SafetyService.shared.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+    }
 
     // MARK: Feed
 
+    /// Featured carousel minus blocked/reported content.
+    var visibleFeatured: [DigitalAsset] {
+        SafetyService.shared.visible(featuredAssets)
+    }
+
     /// The full feed for the active filter.
     var feedAssets: [DigitalAsset] {
+        let base = SafetyService.shared.visible(allAssets)
         switch feedFilter {
         case .forYou:
             // Prefer the server-ranked personalized feed; fall back to newest.
-            return recommendedAssets.isEmpty
-                ? allAssets.sorted { $0.createdAt > $1.createdAt }
-                : recommendedAssets
+            let recs = SafetyService.shared.visible(recommendedAssets)
+            return recs.isEmpty
+                ? base.sorted { $0.createdAt > $1.createdAt }
+                : recs
         case .trending:
-            return allAssets.sorted { $0.engagementScore > $1.engagementScore }
+            return base.sorted { $0.engagementScore > $1.engagementScore }
         case .nearby:
             // Assets with a known distance first, closest to farthest.
-            return allAssets.sorted {
+            return base.sorted {
                 ($0.distanceMeters ?? .greatestFiniteMagnitude) <
                 ($1.distanceMeters ?? .greatestFiniteMagnitude)
             }
@@ -99,22 +114,53 @@ final class ARExploreViewModel: ObservableObject {
 
     // MARK: Loading
 
+    /// Shows the local cache instantly, then replaces it with fresh server data.
+    /// `refresh()` (pull-to-refresh) skips straight to the network.
     func load() async {
         isLoading = allAssets.isEmpty
         errorMessage = nil
 
-        allAssets = await repo.fetchAll()
+        let cached = await repo.fetchAll()
+        if !cached.isEmpty { apply(cached) }
+        isLoading = false
 
-        let byEngagement = allAssets.sorted { $0.engagementScore > $1.engagementScore }
-        featuredAssets = Array(byEngagement.prefix(6))
-        // Top quarter of assets (at least the featured ones) count as trending.
-        let trendingSlice = byEngagement.prefix(max(6, allAssets.count / 4))
-        trendingIds = Set(trendingSlice.map(\.id))
+        await refresh()
+    }
 
+    func refresh() async {
+        let fresh = await repo.fetchAll(forceRefresh: true)
+        if !fresh.isEmpty {
+            apply(fresh)
+            errorMessage = nil
+        } else if allAssets.isEmpty {
+            // fetchAll returns [] only when both the network and cache came
+            // back empty; distinguish "offline" from "nothing posted yet".
+            errorMessage = await isReachable()
+                ? nil
+                : "Can't reach Locolo right now. Pull to retry."
+        }
         isLoading = false
 
         await loadRecommended()
         await loadCreators(for: allAssets)
+    }
+
+    private func apply(_ assets: [DigitalAsset]) {
+        allAssets = assets
+        let byEngagement = assets.sorted { $0.engagementScore > $1.engagementScore }
+        featuredAssets = Array(byEngagement.prefix(6))
+        // Top quarter of assets (at least the featured ones) count as trending.
+        let trendingSlice = byEngagement.prefix(max(6, assets.count / 4))
+        trendingIds = Set(trendingSlice.map(\.id))
+    }
+
+    private func isReachable() async -> Bool {
+        do {
+            _ = try await client.from("digital_assets").select("asset_id").limit(1).execute()
+            return true
+        } catch {
+            return false
+        }
     }
 
     // MARK: Personalized feed (WS5)

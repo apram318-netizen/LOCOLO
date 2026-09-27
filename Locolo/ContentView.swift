@@ -31,6 +31,20 @@ struct ContentView: View {
                 AuthStartView()
             }
         }
+        .onOpenURL { url in
+            DeepLinkRouter.shared.handle(url)
+        }
+        .onChange(of: userVM.isAuthenticated) { _, authenticated in
+            // The Firebase chat session must follow the Supabase one: otherwise
+            // the next person to sign in on this device inherits the previous
+            // Firestore identity.
+            if authenticated {
+                Task { await signInFirebaseIfNeeded() }
+            } else {
+                do { try Auth.auth().signOut() }
+                catch { print(" Firebase signOut failed:", error) }
+            }
+        }
         .task {
             await userVM.restoreSession()
             await signInFirebaseIfNeeded()

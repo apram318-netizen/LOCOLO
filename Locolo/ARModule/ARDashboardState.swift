@@ -59,6 +59,8 @@ enum ARRoute: Hashable {
     case profile(userId: UUID)                       // WS4 public creator profile
     case followList(userId: UUID, followers: Bool)   // WS4 followers / following list
     case conversations                               // WS6 E2E messages inbox
+    case settings                                    // account, safety, sign out
+    case chat(conversationId: String)                // WS6 single conversation
 }
 
 // MARK: - State

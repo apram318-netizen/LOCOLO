@@ -27,7 +27,7 @@ class UsersRepository {
 
         let response: [User] = try await client
             .from("users")
-            .select()
+            .select(User.publicColumns)
             .eq("user_id", value: id)
             .limit(1)
             .execute()
@@ -60,7 +60,7 @@ class UsersRepository {
 
         let response: [User] = try await client
             .from("users")
-            .select()
+            .select(User.publicColumns)
             .eq("username", value: username)
             .limit(1)
             .execute()
@@ -110,9 +110,22 @@ class UsersRepository {
     ///   - data: The updated Users model
     /// - Throws: If Supabase update fails
     func updateUser(_ id: UUID, data: User) async throws {
+        // Only user-editable columns: the safety migration grants UPDATE on
+        // just these, so stats / verified_flags / joined_at can't be forged.
+        struct ProfileUpdate: Encodable {
+            let username: String
+            let name: String?
+            let bio: String?
+            let avatar_url: URL?
+            let cover_url: URL?
+        }
         try await client
             .from("users")
-            .update(data)
+            // .minimal: returning the row would need SELECT on every column,
+            // including the revoked email column.
+            .update(ProfileUpdate(username: data.username, name: data.name, bio: data.bio,
+                                  avatar_url: data.avatarUrl, cover_url: data.coverUrl),
+                    returning: .minimal)
             .eq("user_id", value: id)
             .execute()
 

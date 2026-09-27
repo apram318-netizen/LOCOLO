@@ -43,6 +43,13 @@ class NotificationService: UNNotificationServiceExtension {
             bestAttemptContent.body = messageText
         }
 
+        // Chat is end-to-end encrypted and this extension has no access to the
+        // app's Keychain identity key, so it can't decrypt. Never surface the
+        // base64 ciphertext on the lock screen.
+        if Self.looksLikeCiphertext(bestAttemptContent.body) {
+            bestAttemptContent.body = "🔒 New encrypted message"
+        }
+
         // 4. OPTIONAL: Add badge / sound
         bestAttemptContent.sound = .default
 
@@ -51,6 +58,14 @@ class NotificationService: UNNotificationServiceExtension {
     }
 
     
+    /// AES-GCM combined box = 12-byte nonce + ciphertext + 16-byte tag, base64.
+    private static func looksLikeCiphertext(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 40, !trimmed.contains(" "),
+              let data = Data(base64Encoded: trimmed) else { return false }
+        return data.count >= 28
+    }
+
     override func serviceExtensionTimeWillExpire() {
         // Called just before the extension will be terminated by the system.
         // Use this as an opportunity to deliver your "best attempt" at modified content, otherwise the original push payload will be used.

@@ -31,6 +31,16 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     @Published var isAssetSaved = false
     @Published var showSuccessAlert = false
 
+    // Set after a successful save so the success UI can offer a share link.
+    // Survives the post-save form reset; cleared at the start of the next save.
+    @Published var savedAssetId: UUID?
+    @Published var savedAssetName: String = ""
+
+    /// Deep link into this asset (registered scheme: locolo://). (WS7.4)
+    var savedAssetShareURL: URL? {
+        savedAssetId.flatMap { URL(string: "locolo://asset/\($0.uuidString.lowercased())") }
+    }
+
     // MARK: File
     @Published var localFileURL: URL?        // user-picked model file (fbx/usdz)
     @Published var uploadedFileURL: URL?     // Supabase public URL after upload
@@ -153,10 +163,11 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
         let accessGranted = url.startAccessingSecurityScopedResource()
         defer { if accessGranted { url.stopAccessingSecurityScopedResource() } }
 
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-        if FileManager.default.fileExists(atPath: tempURL.path) {
-            try? FileManager.default.removeItem(at: tempURL)
-        }
+        // Unique name: drawn models already live in temporaryDirectory, so a
+        // name derived from lastPathComponent alone would delete the source.
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-\(url.lastPathComponent)")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
 
         do {
             try FileManager.default.copyItem(at: url, to: tempURL)
@@ -339,6 +350,7 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     /// - Parameter userId: The UUID of the logged-in user creating the asset
     func saveAsset(userId: UUID) async {
         print(" Starting digital asset upload (saveAsset)")
+        savedAssetId = nil   // clear any previous save's share state
 
         guard let uploaded = uploadedFileURL else {
             error = "File has not been uploaded."
@@ -440,10 +452,19 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             )
 
             print(" Uploading asset to 'digital_assets' table...")
-            try await client.from("digital_assets").insert(newAsset).execute()
-            print("  Digital asset inserted successfully!")
-            
+            struct AssetInsertResponse: Decodable { let asset_id: UUID }
+            let inserted: AssetInsertResponse = try await client
+                .from("digital_assets")
+                .insert(newAsset)
+                .select("asset_id")
+                .single()
+                .execute()
+                .value
+            print("  Digital asset inserted successfully! id:", inserted.asset_id)
+
             await MainActor.run {
+                savedAssetId = inserted.asset_id
+                savedAssetName = name.isEmpty ? "Untitled Asset" : name
                 isAssetSaved = true
                 showSuccessAlert = true
             }

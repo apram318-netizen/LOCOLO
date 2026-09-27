@@ -5,17 +5,27 @@
 // average. This is the personalization signal for the "For You" feed.
 //
 // Deploy:  supabase functions deploy update-taste
-// Call:    POST { "user_id": "<uuid>", "asset_id": "<uuid>" }
+// Call:    POST { "asset_id": "<uuid>" }   (Authorization: Bearer <user access token>)
+//
+// The user is ALWAYS the caller from the JWT. A body user_id is accepted for
+// backwards compatibility but must match, otherwise anyone could rewrite
+// another user's taste profile with the service role.
 //
 // Alpha controls how fast taste shifts toward new interests.
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { admin, errorResponse, HttpError, json, requireUser } from "../_shared/auth.ts";
 
 const ALPHA = 0.15;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 Deno.serve(async (req) => {
   try {
+    const caller = await requireUser(req);
     const { user_id, asset_id } = await req.json();
-    if (!user_id || !asset_id) return json({ error: "missing user_id or asset_id" }, 400);
+    if (!asset_id || !UUID_RE.test(asset_id)) throw new HttpError(400, "missing or invalid asset_id");
+    if (user_id && String(user_id).toLowerCase() !== caller.id.toLowerCase()) {
+      throw new HttpError(403, "user_id does not match the signed-in user");
+    }
+    const userId = caller.id;
 
     const supabase = admin();
 
@@ -32,24 +42,24 @@ Deno.serve(async (req) => {
     const { data: user, error: uErr } = await supabase
       .from("users")
       .select("taste_embedding")
-      .eq("user_id", user_id)
+      .eq("user_id", userId)
       .single();
     if (uErr) throw uErr;
 
     const prev = parseVector(user?.taste_embedding);
-    const next = prev
+    const next = prev && prev.length === assetVec.length
       ? prev.map((v, i) => v * (1 - ALPHA) + assetVec[i] * ALPHA)
       : assetVec;
 
     const { error: wErr } = await supabase
       .from("users")
       .update({ taste_embedding: `[${next.join(",")}]`, taste_updated_at: new Date().toISOString() })
-      .eq("user_id", user_id);
+      .eq("user_id", userId);
     if (wErr) throw wErr;
 
-    return json({ ok: true, user_id });
+    return json({ ok: true });
   } catch (e) {
-    return json({ error: String(e) }, 500);
+    return errorResponse(e);
   }
 });
 
@@ -66,18 +76,4 @@ function parseVector(v: unknown): number[] | null {
     }
   }
   return null;
-}
-
-function admin() {
-  return createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
-}
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
 }

@@ -25,6 +25,10 @@ struct ARDashboardRootView: View {
     /// screen preserves its scroll position, map camera, and search state.
     @State private var visitedTabs: Set<ARTab> = [.explore]
 
+    /// One-time welcome flow (discover → create → connect).
+    @AppStorage("ar_onboarding_seen") private var onboardingSeen = false
+    @State private var showOnboarding = false
+
     var body: some View {
         NavigationStack(path: $dashboardState.path) {
             ZStack {
@@ -54,6 +58,15 @@ struct ARDashboardRootView: View {
         .task {
             if let user = userVM.currentUser {
                 await wishlistVM.loadWishlist(for: user.id)
+            }
+            if isRootExperience && !onboardingSeen {
+                showOnboarding = true
+            }
+        }
+        .fullScreenCover(isPresented: $showOnboarding) {
+            AROnboardingView {
+                onboardingSeen = true
+                showOnboarding = false
             }
         }
     }
@@ -85,7 +98,17 @@ struct ARDashboardRootView: View {
         case .viewer:
             ARDisplayView()
         case .create:
-            ARCreateAssetFlowView(userId: userVM.currentUser?.id ?? UUID())
+            if let userId = userVM.currentUser?.id {
+                ARCreateAssetFlowView(userId: userId)
+            } else {
+                ARInlineEmptyState(
+                    icon: "person.crop.circle.badge.exclamationmark",
+                    title: "Sign in to create",
+                    subtitle: "Assets are published under your profile, so you need to be signed in."
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(ARDesign.screenBackground.ignoresSafeArea())
+            }
         case .collection:
             CollectionView()
                 .background(AppColors.screenBackground.ignoresSafeArea())
@@ -99,6 +122,14 @@ struct ARDashboardRootView: View {
             FollowListView(userId: userId, showingFollowers: followers)
         case .conversations:
             ARMessagesView()
+        case .settings:
+            ARSettingsView()
+        case .chat(let conversationId):
+            if let me = userVM.currentUser {
+                ARChatScreen(conversationId: conversationId,
+                             currentUserId: me.id.uuidString,
+                             currentUserName: me.name ?? me.username)
+            }
         }
     }
 }

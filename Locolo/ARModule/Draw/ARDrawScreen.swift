@@ -69,6 +69,8 @@ struct ARDrawScreen: View {
         }
     }
 
+    private let widths: [(String, Float)] = [("Fine", 0.005), ("Medium", 0.01), ("Bold", 0.02)]
+
     private var controls: some View {
         VStack(spacing: 12) {
             // Colour palette
@@ -79,8 +81,29 @@ struct ARDrawScreen: View {
                         .frame(width: 30, height: 30)
                         .overlay(Circle().strokeBorder(.white.opacity(0.9),
                                                        lineWidth: vm.strokeColor == color ? 3 : 1))
-                        .onTapGesture { vm.strokeColor = color }
+                        .onTapGesture { ARHaptics.tick(); vm.strokeColor = color }
+                        .accessibilityLabel(name)
+                        .accessibilityAddTraits(vm.strokeColor == color ? .isSelected : [])
                 }
+
+                Divider().frame(height: 24).overlay(Color.white.opacity(0.4))
+
+                ForEach(widths, id: \.0) { name, radius in
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: CGFloat(radius * 900), height: CGFloat(radius * 900))
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(Color.white.opacity(vm.strokeRadius == radius ? 0.3 : 0.08)))
+                        .onTapGesture { ARHaptics.tick(); vm.strokeRadius = radius }
+                        .accessibilityLabel("\(name) stroke")
+                        .accessibilityAddTraits(vm.strokeRadius == radius ? .isSelected : [])
+                }
+            }
+
+            if vm.totalPoints > 0 {
+                ProgressView(value: Double(vm.totalPoints), total: Double(ARDrawViewModel.maxTotalPoints))
+                    .tint(vm.isNearPointCap ? .orange : .white)
+                    .accessibilityLabel("Canvas used")
             }
 
             HStack(spacing: 14) {
