@@ -55,7 +55,11 @@ struct ARExploreView: View {
             }
         }
         .task { await vm.load() }
-        .sheet(item: $selectedAsset) { AssetDetailSheet(asset: $0) }
+        .sheet(item: $selectedAsset) { asset in
+            AssetDetailSheet(asset: asset, onOpenCreator: {
+                dashboardState.path.append(.profile(userId: asset.userId))
+            })
+        }
     }
 
     // MARK: - Loading

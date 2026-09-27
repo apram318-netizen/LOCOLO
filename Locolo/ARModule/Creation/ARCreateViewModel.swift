@@ -416,7 +416,10 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
                 file_type: fileType,
                 media_url: mediaURL?.absoluteString,
                 media_type: mediaURL == nil ? nil : mediaType,
-                category: "ar_model",
+                // "3d" matches the category taxonomy used by search/profile
+                // filters (art/photo/3d/audio) — "ar_model" mapped to "other"
+                // and hid created assets from every category filter.
+                category: "3d",
                 visibility: visibility,
                 location_id: locationId,
                 rotation_x: Double(rotationDeg.x),

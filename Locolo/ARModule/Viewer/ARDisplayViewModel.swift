@@ -41,6 +41,9 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
     @Published var nearbyAssets: [DigitalAsset] = []
     @Published var listeningHint: String?
 
+    /// Device compass heading in degrees (true north), for the AR radar.
+    @Published var headingDegrees: Double?
+
     /// Set when camera or location permission is denied, so the view can offer
     /// an "Open Settings" path instead of a dead end. (WS3)
     @Published var permissionDenied = false
@@ -138,10 +141,46 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         case .authorizedWhenInUse, .authorizedAlways:
             locationManager.desiredAccuracy = kCLLocationAccuracyBest
             locationManager.startUpdatingLocation()
+            locationManager.startUpdatingHeading()   // drives the AR radar
             armNoFixFallback()
 
         @unknown default:
             break
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        // trueHeading is -1 when invalid; fall back to magnetic.
+        headingDegrees = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+    }
+
+    // MARK: AR radar (bearings to nearby assets)
+
+    struct RadarBlip: Identifiable {
+        let id: UUID
+        /// Radians clockwise from the direction the device is facing.
+        let relativeAngle: Double
+        /// 0 (here) … 1 (at/beyond radar range).
+        let normalizedDistance: Double
+    }
+
+    /// Blips for the radar overlay: each nearby asset's bearing relative to
+    /// where the user is facing, distance-scaled into the ring.
+    var radarBlips: [RadarBlip] {
+        guard let origin = userLocation, let heading = headingDegrees else { return [] }
+        let radarRange: Double = 200   // metres represented by the ring's edge
+        return nearbyAssets.compactMap { asset in
+            guard let lat = asset.latitude, let lon = asset.longitude else { return nil }
+            let target = CLLocation(latitude: lat, longitude: lon)
+            let distance = origin.distance(from: target)
+            let absolute = bearing(from: origin.coordinate,
+                                   to: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+            let relative = absolute - heading * .pi / 180
+            return RadarBlip(
+                id: asset.id,
+                relativeAngle: relative,
+                normalizedDistance: min(distance / radarRange, 1.0)
+            )
         }
     }
 

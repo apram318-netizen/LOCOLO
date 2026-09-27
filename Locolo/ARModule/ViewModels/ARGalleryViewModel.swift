@@ -43,7 +43,13 @@ final class ARGalleryViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
 
+    /// Semantic matches from the pgvector pipeline (WS5.3). Empty when the
+    /// embed-query function isn't deployed / errors — keyword search still works.
+    @Published var semanticResults: [DigitalAsset] = []
+    @Published var isDeepSearching = false
+
     private let repo = DigitalAssetRepository()
+    private let client = SupabaseManager.shared.client
 
     var hasActiveFilters: Bool {
         selectedCategory != "all" || onlyForSale || onlyAcceptsOffers
@@ -120,5 +126,71 @@ final class ARGalleryViewModel: ObservableObject {
         artworks = await repo.fetchAll()
         errorMessage = nil
         isLoading = false
+    }
+
+    // MARK: - Deep semantic search (WS5.3)
+
+    private struct EmbedResponse: Decodable { let embedding: [Double] }
+
+    private struct SemanticParams: Encodable {
+        let p_user: String
+        let p_lat: Double
+        let p_lon: Double
+        let p_radius_meters: Double
+        let p_query_embedding: String
+        let p_limit: Int
+    }
+
+    /// Embed the query via the embed-query edge function, then rank with
+    /// get_recommended_assets. Degrades silently to keyword-only search when
+    /// the function isn't deployed, the user has no location, or anything fails.
+    func deepSearch() async {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.count >= 3 else {
+            semanticResults = []
+            return
+        }
+        guard
+            let idString = SupabaseManager.shared.currentUserId,
+            let coord = LocationManager.shared.userLocation ?? LocationManager.shared.latestStoredLocation
+        else { return }
+
+        isDeepSearching = true
+        defer { isDeepSearching = false }
+
+        do {
+            // 1) Embed the query text.
+            var request = URLRequest(url: URL(string: "\(Secrets.supabaseURL)/functions/v1/embed-query")!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+            request.httpBody = try JSONEncoder().encode(["q": query])
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                semanticResults = []   // function not deployed yet — keyword only
+                return
+            }
+            let embedding = try JSONDecoder().decode(EmbedResponse.self, from: data).embedding
+            let vectorLiteral = "[" + embedding.map { String($0) }.joined(separator: ",") + "]"
+
+            // 2) Rank semantically (same 41-column shape as the nearby RPC).
+            let results: [DigitalAsset] = try await client
+                .rpc("get_recommended_assets", params: SemanticParams(
+                    p_user: idString,
+                    p_lat: coord.latitude,
+                    p_lon: coord.longitude,
+                    p_radius_meters: 50_000,
+                    p_query_embedding: vectorLiteral,
+                    p_limit: 20
+                ))
+                .execute()
+                .value
+
+            semanticResults = results
+        } catch {
+            semanticResults = []
+            print("Deep search unavailable:", error.localizedDescription)
+        }
     }
 }

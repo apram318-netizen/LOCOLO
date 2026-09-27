@@ -13,10 +13,17 @@ struct CreatorProfileView: View {
 
     @StateObject private var vm: CreatorProfileViewModel
     @EnvironmentObject private var dashboardState: ARDashboardState
+    @EnvironmentObject private var userVM: UserViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedAsset: DigitalAsset?
-    @State private var showMessagesComingSoon = false
+    @State private var activeChat: ActiveChat?
+    @State private var isOpeningChat = false
+
+    /// Identifiable wrapper so the chat sheet can be driven by .sheet(item:).
+    private struct ActiveChat: Identifiable {
+        let id: String   // conversation id
+    }
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -65,10 +72,49 @@ struct CreatorProfileView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task { await vm.load() }
         .sheet(item: $selectedAsset) { AssetDetailSheet(asset: $0) }
-        .alert("Messaging is coming soon", isPresented: $showMessagesComingSoon) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Encrypted chat with creators arrives in a future update.")
+        .sheet(item: $activeChat) { chat in
+            // E2E chat with this creator (WS6). peerId passed explicitly so the
+            // key derives immediately without a participants fetch.
+            if let me = userVM.currentUser {
+                NavigationStack {
+                    ChatView(
+                        vm: ChatViewModel(
+                            conversationId: chat.id,
+                            userId: me.id.uuidString.lowercased(),
+                            peerId: userId
+                        ),
+                        currentUserId: me.id.uuidString.lowercased(),
+                        currentUserName: me.name ?? me.username
+                    )
+                    .navigationTitle(vm.creator?.displayName ?? "Chat")
+                    .navigationBarTitleDisplayMode(.inline)
+                }
+            }
+        }
+    }
+
+    // MARK: - Messaging
+
+    /// Find-or-create the 1:1 conversation with this creator, then open chat.
+    private func startConversation() {
+        guard let me = userVM.currentUser, !isOpeningChat else { return }
+        isOpeningChat = true
+        let myId = me.id.uuidString.lowercased()
+        let peer = userId.uuidString.lowercased()
+        Task {
+            defer { isOpeningChat = false }
+            let repo = ChatRepository()
+            do {
+                let convoId: String
+                if let existing = try await repo.findExistingConversation(between: myId, and: peer) {
+                    convoId = existing
+                } else {
+                    convoId = try await repo.createConversation(between: [myId, peer])
+                }
+                activeChat = ActiveChat(id: convoId)
+            } catch {
+                vm.errorMessage = "Couldn't open the conversation. Try again."
+            }
         }
     }
 
@@ -170,13 +216,20 @@ struct CreatorProfileView: View {
                 }
                 .disabled(vm.isMutatingFollow)
 
-                Button { showMessagesComingSoon = true } label: {
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.primary)
-                        .frame(width: 46, height: 46)
-                        .background(Circle().fill(ARDesign.headerButtonCircle))
+                Button { startConversation() } label: {
+                    Group {
+                        if isOpeningChat {
+                            ProgressView().tint(.primary)
+                        } else {
+                            Image(systemName: "bubble.left.and.bubble.right.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    .frame(width: 46, height: 46)
+                    .background(Circle().fill(ARDesign.headerButtonCircle))
                 }
+                .disabled(isOpeningChat)
                 .accessibilityLabel("Message")
             } else if vm.isSelf {
                 Text("This is you")

@@ -14,6 +14,9 @@ import CryptoKit
 class ChatViewModel: ObservableObject {
     // MARK: - Published State
     @Published var messages: [Message] = []       // decrypted for display
+    /// True when the peer's published key differs from the one we last saw —
+    /// a "safety number changed" signal (key rotation or a possible MITM). (WS6)
+    @Published var peerKeyChanged = false
 
     private let repo = ChatRepository()
     private var conversationId: String            // Firestore document ID for the chat
@@ -45,6 +48,14 @@ class ChatViewModel: ObservableObject {
                 .flatMap { UUID(uuidString: $0) }
         }
         guard let peer, let peerKey = await KeyDirectory.shared.publicKey(for: peer) else { return }
+
+        // Safety-number check: warn if the peer's key differs from the one we
+        // last pinned for them (key rotation, new device, or a possible MITM).
+        let pinKey = "peerKey_\(peer.uuidString.lowercased())"
+        if let pinned = UserDefaults.standard.string(forKey: pinKey), pinned != peerKey {
+            peerKeyChanged = true
+        }
+        UserDefaults.standard.set(peerKey, forKey: pinKey)
 
         conversationKey = try? CryptoService.shared.conversationKey(
             conversationId: conversationId,

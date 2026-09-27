@@ -68,6 +68,22 @@ struct ARDisplayView: View {
             }
 
 
+            // MARK: - AR Radar
+            // A compass ring showing where nearby assets are around you —
+            // blips rotate as you turn, drift inward as you approach.
+            if vm.isLocalized && !vm.radarBlips.isEmpty {
+                VStack {
+                    Spacer()
+                    HStack {
+                        ARRadarView(blips: vm.radarBlips, heading: vm.headingDegrees)
+                            .padding(.leading, 20)
+                            .padding(.bottom, 96)
+                        Spacer()
+                    }
+                }
+                .transition(.scale.combined(with: .opacity))
+            }
+
             // MARK: - Status Message
             // Shows helpful AR messages at the bottom (accuracy, loading, errors, etc).
             if let msg = vm.statusMessage {
@@ -204,6 +220,83 @@ struct ARViewContainer: UIViewRepresentable {
     }
 }
 
+
+// MARK: - AR Radar
+// Glass compass ring: N marker tracks true north, purple blips are nearby
+// assets (angle = bearing relative to facing, radius = distance).
+struct ARRadarView: View {
+    let blips: [ARDisplayViewModel.RadarBlip]
+    let heading: Double?
+
+    private let size: CGFloat = 108
+
+    var body: some View {
+        ZStack {
+            // Ring + sweep background
+            Circle()
+                .fill(.ultraThinMaterial)
+            Circle()
+                .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
+            Circle()
+                .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+                .frame(width: size * 0.55, height: size * 0.55)
+
+            // Facing wedge (what's roughly in front of the camera)
+            RadarWedge()
+                .fill(LinearGradient(colors: [Color.purple.opacity(0.35), .clear],
+                                     startPoint: .bottom, endPoint: .top))
+                .frame(width: size, height: size)
+
+            // North marker, rotating opposite the device heading
+            if let heading {
+                Text("N")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.85))
+                    .offset(y: -size / 2 + 9)
+                    .rotationEffect(.degrees(-heading))
+            }
+
+            // Asset blips
+            ForEach(blips) { blip in
+                Circle()
+                    .fill(LinearGradient(colors: [.purple, .pink],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 7, height: 7)
+                    .shadow(color: .purple.opacity(0.8), radius: 3)
+                    .offset(blipOffset(blip))
+            }
+
+            // You
+            Circle()
+                .fill(Color.white)
+                .frame(width: 6, height: 6)
+                .shadow(color: .white.opacity(0.9), radius: 2)
+        }
+        .frame(width: size, height: size)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(blips.count) AR asset\(blips.count == 1 ? "" : "s") nearby")
+    }
+
+    private func blipOffset(_ blip: ARDisplayViewModel.RadarBlip) -> CGSize {
+        // Up = the direction the device is facing. Keep a small inner margin.
+        let r = (size / 2 - 10) * CGFloat(max(blip.normalizedDistance, 0.12))
+        return CGSize(width: r * CGFloat(sin(blip.relativeAngle)),
+                      height: -r * CGFloat(cos(blip.relativeAngle)))
+    }
+}
+
+/// Narrow triangle from the center to the top edge — the facing indicator.
+private struct RadarWedge: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        p.move(to: c)
+        p.addLine(to: CGPoint(x: rect.midX - rect.width * 0.16, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.midX + rect.width * 0.16, y: rect.minY))
+        p.closeSubpath()
+        return p
+    }
+}
 
 // MARK: - Shared ARView
 // Keeps one shared ARView instance so the AR session does not reset unnecessarily.

@@ -14,14 +14,18 @@ import CoreLocation
 
 struct AssetDetailSheet: View {
     let asset: DigitalAsset
-    
+    /// Open the creator's public profile (WS4). The sheet can't push the nav
+    /// stack itself, so the presenter passes a closure that dismisses + pushes.
+    var onOpenCreator: (() -> Void)? = nil
+
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var userVM: UserViewModel
-    
+    @EnvironmentObject var wishlistVM: WishlistViewModel
+
     // I just override the whole colour scheme.
     // I tried mixing light/dark earlier and it looked ugly + too bright.
     private let isDark = true
-    
+
     @State private var showARView = false
     @State private var showOffers = false
     @State private var showCreateOffer = false
@@ -30,6 +34,8 @@ struct AssetDetailSheet: View {
     @State private var isAboutExpanded: Bool = false
     @State private var resolvedLocationName: String = "Unknown"
     @State private var isWishlisted: Bool = false
+    @State private var isHyped: Bool = false
+    @State private var hypeCount: Int = 0
     
     var body: some View {
         NavigationStack {
@@ -86,6 +92,13 @@ struct AssetDetailSheet: View {
             .onAppear {
                 computeDistance()
                 reverseGeocodeAssetLocation()
+                hypeCount = asset.hypeCount
+                isWishlisted = wishlistVM.items.contains { $0.id == asset.id }
+            }
+            .task {
+                if let me = userVM.currentUser?.id {
+                    isHyped = await AssetEngagementRepository.shared.isHyped(userId: me, assetId: asset.id)
+                }
             }
         }
     }
@@ -100,8 +113,11 @@ extension AssetDetailSheet {
     
     // AR button only appears if you're close to the asset
     // I put 150m because earlier 100m felt too strict.
+    // Any placeable USDZ (or panorama) qualifies — the old
+    // interactionType == "ar" gate could never be true because creation
+    // never writes that value.
     private var shouldShowARButton: Bool {
-        guard (asset.interactionType == "ar" || asset.panoramaUrl != nil),
+        guard asset.fileType.lowercased() == "usdz" || asset.panoramaUrl != nil,
               let meters = distanceMeters else { return false }
         return meters <= 150
     }
@@ -174,8 +190,8 @@ extension AssetDetailSheet {
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.5))
                 
-                // wishlist button
-                Button { isWishlisted.toggle() } label: {
+                // wishlist button — persists via WishlistViewModel
+                Button { toggleWishlist() } label: {
                     ZStack {
                         Circle()
                             .fill(Color.white.opacity(0.09))
@@ -185,6 +201,7 @@ extension AssetDetailSheet {
                     }
                 }
                 .padding(.top, 4)
+                .accessibilityLabel(isWishlisted ? "Remove from wishlist" : "Save to wishlist")
             }
         }
     }
@@ -199,14 +216,42 @@ extension AssetDetailSheet {
     }
     
     
-    // MARK: - HYPE
+    // MARK: - HYPE + CREATOR
     private var hypeOnlySection: some View {
-        HStack {
-            // I made hype yellow because with purple it didn’t pop.
-            Label("\(asset.hypeCount)", systemImage: "bolt.fill")
-                .foregroundColor(.yellow)
+        HStack(spacing: 12) {
+            // Interactive hype toggle — persists via asset_hype + atomic RPC.
+            Button { toggleHype() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: isHyped ? "bolt.fill" : "bolt")
+                    Text("\(hypeCount)")
+                        .font(.subheadline.weight(.semibold))
+                        .contentTransition(.numericText())
+                }
+                .foregroundColor(isHyped ? .yellow : .white.opacity(0.75))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(Color.white.opacity(isHyped ? 0.14 : 0.08)))
+            }
+            .accessibilityLabel(isHyped ? "Remove hype" : "Hype this asset")
+
+            if let onOpenCreator {
+                Button {
+                    dismiss()
+                    onOpenCreator()
+                } label: {
+                    Label("Creator", systemImage: "person.crop.circle")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(.white.opacity(0.85))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                }
+                .accessibilityLabel("View creator profile")
+            }
+
             Spacer()
         }
+        .padding(.top, 6)
     }
     
     
@@ -249,24 +294,9 @@ extension AssetDetailSheet {
     private var buttonSection: some View {
         VStack(spacing: 12) {
 
-            // BUY NOW
-            if asset.isForSale == true && !isCurrentUserOwner {
-                Button {
-                    // still TODO — I will add purchase flow later
-                } label: {
-                    HStack {
-                        Image(systemName: "bag.fill")
-                        Text("Buy Now")
-                    }
-                    .font(.body.bold())
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(AppColors.purplePinkGradient)
-                    .foregroundColor(.white)
-                    .cornerRadius(16)
-                }
-            }
-            
+            // Buy Now removed for v1 — payments are out of scope; offers stay
+            // as the non-transactional marketplace path.
+
             // OFFERS
             if asset.acceptsOffers == true {
                 if isCurrentUserOwner {
@@ -302,15 +332,64 @@ extension AssetDetailSheet {
                         .foregroundColor(.white)
                         .cornerRadius(14)
                 }
-                .sheet(isPresented: $showARView) {
-                    // temporary placeholder
-                    Text("AR Coming Soon")
+                .fullScreenCover(isPresented: $showARView) {
+                    // The real AR viewer — places this and other nearby assets
+                    // around the user (geo-anchored, GPS fallback).
+                    ZStack(alignment: .topLeading) {
+                        ARDisplayView()
+                        Button { showARView = false } label: {
+                            Image(systemName: "xmark")
+                                .font(.subheadline.bold())
+                                .foregroundColor(.white)
+                                .padding(10)
+                                .background(Circle().fill(.black.opacity(0.5)))
+                        }
+                        .padding(.top, 54)
+                        .padding(.leading, 20)
+                        .accessibilityLabel("Close AR view")
+                    }
+                    .ignoresSafeArea()
                 }
             }
         }
     }
 }
 
+
+// MARK: - ENGAGEMENT ACTIONS
+extension AssetDetailSheet {
+    private func toggleHype() {
+        guard let me = userVM.currentUser?.id else { return }
+        ARHaptics.tick()
+        // Optimistic flip; reconcile with the server's answer.
+        isHyped.toggle()
+        hypeCount += isHyped ? 1 : -1
+        Task {
+            if let state = await AssetEngagementRepository.shared.toggleHype(userId: me, assetId: asset.id) {
+                isHyped = state.hyped
+                hypeCount = state.hype_count
+            } else {
+                // Server failed — roll back.
+                isHyped.toggle()
+                hypeCount += isHyped ? 1 : -1
+            }
+        }
+    }
+
+    private func toggleWishlist() {
+        guard let me = userVM.currentUser?.id else { return }
+        ARHaptics.tick()
+        let was = isWishlisted
+        isWishlisted.toggle()
+        Task {
+            if was {
+                await wishlistVM.removeFromWishlist(userId: me, assetId: asset.id)
+            } else {
+                await wishlistVM.addToWishlist(userId: me, assetId: asset.id)
+            }
+        }
+    }
+}
 
 // MARK: - DISTANCE CALCULATION
 extension AssetDetailSheet {

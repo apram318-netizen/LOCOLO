@@ -66,7 +66,11 @@ struct ARSearchView: View {
             }
         }
         .task { await vm.loadArtworks() }
-        .sheet(item: $selectedAsset) { AssetDetailSheet(asset: $0) }
+        .sheet(item: $selectedAsset) { asset in
+            AssetDetailSheet(asset: asset, onOpenCreator: {
+                dashboardState.path.append(.profile(userId: asset.userId))
+            })
+        }
         .sheet(isPresented: $showFilters) {
             filterSheet
                 .presentationDetents([.medium])
@@ -215,6 +219,12 @@ struct ARSearchView: View {
 
     private var resultsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Semantic matches surface above the keyword results when the
+            // pgvector pipeline returns anything for this query. (WS5.3)
+            if vm.isDeepSearching || !vm.semanticResults.isEmpty {
+                semanticSection
+            }
+
             HStack {
                 Text("\(vm.filteredArtworks.count) result\(vm.filteredArtworks.count == 1 ? "" : "s")")
                     .font(.subheadline.weight(.semibold))
@@ -326,6 +336,50 @@ struct ARSearchView: View {
 
     // MARK: - Recent searches
 
+    // MARK: - Semantic matches (WS5.3)
+
+    private var semanticSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                ARSectionHeader(title: "Best matches", icon: "wand.and.stars")
+                if vm.isDeepSearching {
+                    ProgressView().controlSize(.small).tint(.purple)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+
+            if !vm.semanticResults.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(vm.semanticResults) { asset in
+                            Button { selectedAsset = asset } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    AssetThumbnailView(asset: asset, cornerRadius: 14)
+                                        .frame(width: 132, height: 100)
+                                        .clipped()
+                                    Text(asset.name ?? "Untitled")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+                                    if let loc = asset.displayLocation {
+                                        Text(loc)
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .frame(width: 132)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+        }
+    }
+
     private func commitSearch(_ term: String) {
         let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -336,6 +390,10 @@ struct ARSearchView: View {
         var recents = recentSearches.filter { $0.localizedCaseInsensitiveCompare(trimmed) != .orderedSame }
         recents.insert(trimmed, at: 0)
         recentSearchesData = (try? JSONEncoder().encode(Array(recents.prefix(8)))) ?? Data()
+
+        // Kick off semantic (pgvector) search alongside keyword filtering.
+        // Silently no-ops until the embed-query function is deployed. (WS5.3)
+        Task { await vm.deepSearch() }
     }
 
     private func clearRecentSearches() {
