@@ -19,7 +19,11 @@ struct ARPlacementView: UIViewRepresentable {
         arView.automaticallyConfigureSession = true
 
         // --- Configure AR Session ---
+        // North-aligned world so captured orientation is expressed relative to
+        // true north (-Z = north, +X = east). This is the frame the viewer
+        // replays in, so the asset faces the same real-world direction. (WS2)
         let config = ARWorldTrackingConfiguration()
+        config.worldAlignment = .gravityAndHeading
         config.planeDetection = [.horizontal]
         config.environmentTexturing = .automatic
         arView.session.run(config)
@@ -52,7 +56,10 @@ struct ARPlacementView: UIViewRepresentable {
                         receiveValue: { entity in
                             print(" Model entity loaded")
                             entity.generateCollisionShapes(recursive: true)
-                            arView.installGestures([.translation, .rotation, .scale], for: entity)
+                            // No .translation: the saved position is the user's
+                            // GPS point, so letting them drag the model would be
+                            // dishonest (the drag is discarded). Rotate/scale only. (WS2)
+                            arView.installGestures([.rotation, .scale], for: entity)
 
                             let anchor = AnchorEntity(plane: .horizontal)
                             anchor.addChild(entity)
@@ -95,8 +102,9 @@ struct ARPlacementView: UIViewRepresentable {
             label.widthAnchor.constraint(lessThanOrEqualTo: arView.widthAnchor, multiplier: 0.9)
         ])
 
-        // Keep view model reference inside coordinator
+        // Keep view model + guidance label references inside coordinator
         context.coordinator.vm = vm
+        context.coordinator.guidanceLabel = label
         return arView
     }
 
@@ -111,6 +119,7 @@ struct ARPlacementView: UIViewRepresentable {
         var entity: ModelEntity?
         var cancellable: AnyCancellable?
         weak var vm: ARCreateViewModel?
+        weak var guidanceLabel: UILabel?
 
         // Allow gestures to coexist
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
@@ -123,15 +132,28 @@ struct ARPlacementView: UIViewRepresentable {
             guard sender.state == .began else { return }
             print(" [Coordinator] Long press detected")
 
-            guard let transform = entity?.transform else {
-                print(" [Coordinator] No transform found on entity")
+            guard let entity = entity else {
+                print(" [Coordinator] No entity to place")
                 return
             }
 
-            // Save placement + navigate
+            // The compass must be reliable — otherwise the captured heading
+            // (and thus this asset's facing direction for every future viewer)
+            // is wrong. Block placement and prompt a figure-8 calibration. (WS2)
+            if let vm = vm, !vm.hasReliableHeading {
+                guidanceLabel?.text = "🧭 Calibrate compass\nMove your phone in a figure-8, then hold to place"
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                return
+            }
+
+            // Capture orientation & scale in WORLD space (relative to the
+            // north-aligned session), not relative to the plane anchor. (WS2)
+            let worldRotation = entity.orientation(relativeTo: nil)
+            let worldScale = entity.scale(relativeTo: nil)
+
             DispatchQueue.main.async {
-                print(" [Coordinator] Saving transform to ViewModel & navigating")
-                self.vm?.setPlacement(transform: transform)
+                print(" [Coordinator] Saving world-space placement to ViewModel & navigating")
+                self.vm?.setPlacement(rotationWorld: worldRotation, scale: worldScale)
 
                 // Push "details" destination after a short delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {

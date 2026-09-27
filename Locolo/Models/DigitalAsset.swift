@@ -41,9 +41,19 @@ struct DigitalAsset: Identifiable, Codable {
     let scaleX: Double?
     let scaleY: Double?
     let scaleZ: Double?
-    
-    
-    
+
+    // World-space rotation quaternion captured in a north-aligned frame (WS2).
+    // Preferred over the Euler angles above; nil for legacy assets.
+    let rotQX: Double?
+    let rotQY: Double?
+    let rotQZ: Double?
+    let rotQW: Double?
+    // Compass accuracy (degrees) at placement; lets the viewer down-rank assets
+    // captured with a poor heading. Negative/nil = unknown.
+    let headingAccuracyDeg: Double?
+
+
+
     ///Offers Now
     let isForSale: Bool?
     let acceptsOffers: Bool?
@@ -84,6 +94,11 @@ struct DigitalAsset: Identifiable, Codable {
         case scaleX = "scale_x"
         case scaleY = "scale_y"
         case scaleZ = "scale_z"
+        case rotQX = "rot_qx"
+        case rotQY = "rot_qy"
+        case rotQZ = "rot_qz"
+        case rotQW = "rot_qw"
+        case headingAccuracyDeg = "heading_accuracy_deg"
         case isForSale = "is_for_sale"
         case acceptsOffers = "accepts_offers"
         case currentValue = "current_value"

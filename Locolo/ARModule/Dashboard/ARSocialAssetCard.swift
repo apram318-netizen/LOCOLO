@@ -15,6 +15,8 @@ struct ARSocialAssetCard: View {
     var isTrending = false
     /// Push the AR viewer (only offered when the asset is physically nearby).
     var onOpenInAR: (() -> Void)? = nil
+    /// Open the creator's public profile (WS4).
+    var onOpenCreator: (() -> Void)? = nil
 
     @EnvironmentObject var userVM: UserViewModel
     @EnvironmentObject var wishlistVM: WishlistViewModel
@@ -53,36 +55,44 @@ struct ARSocialAssetCard: View {
 
     private var creatorRow: some View {
         HStack(spacing: 10) {
-            AsyncImage(url: creator?.avatarUrl) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                ZStack {
-                    Circle().fill(Color.purple.opacity(0.2))
-                    Image(systemName: "person.fill")
-                        .font(.caption)
-                        .foregroundColor(.purple)
-                }
-            }
-            .frame(width: 34, height: 34)
-            .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(creator?.displayName ?? "AR Creator")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                    if creator?.isVerified == true {
-                        Image(systemName: "checkmark.seal.fill")
+            // Avatar + name open the creator's profile; the rest of the card
+            // opens the asset detail sheet. (WS4)
+            HStack(spacing: 10) {
+                AsyncImage(url: creator?.avatarUrl) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    ZStack {
+                        Circle().fill(Color.purple.opacity(0.2))
+                        Image(systemName: "person.fill")
                             .font(.caption)
-                            .foregroundStyle(.blue)
-                            .accessibilityLabel("Verified creator")
+                            .foregroundColor(.purple)
                     }
                 }
-                Text(asset.createdAt.formatted(.relative(presentation: .named)))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                .frame(width: 34, height: 34)
+                .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(creator?.displayName ?? "AR Creator")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                        if creator?.isVerified == true {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.caption)
+                                .foregroundStyle(.blue)
+                                .accessibilityLabel("Verified creator")
+                        }
+                    }
+                    Text(asset.createdAt.formatted(.relative(presentation: .named)))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { onOpenCreator?() }
+            .accessibilityAddTraits(onOpenCreator == nil ? [] : .isButton)
+            .accessibilityLabel("View \(creator?.displayName ?? "creator")'s profile")
 
             Spacer()
 

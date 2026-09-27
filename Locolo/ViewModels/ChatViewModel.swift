@@ -2,88 +2,118 @@
 //  ChatViewModel.swift
 //  Locolo
 //
-//  Created by Apramjot Singh on 29/10/2025.
+//  Real-time chat with end-to-end encryption (WS6). Messages travel and rest as
+//  ciphertext; this view model derives the conversation key (from the peer's
+//  published public key), decrypts what comes in, and encrypts what goes out.
 //
 
 import Foundation
+import CryptoKit
 
-/// Handles listening to Firestore message streams and sending new messages in real-time.
 @MainActor
 class ChatViewModel: ObservableObject {
     // MARK: - Published State
-    @Published var messages: [Message] = []       // all messages in current conversation
+    @Published var messages: [Message] = []       // decrypted for display
 
     private let repo = ChatRepository()
     private var conversationId: String            // Firestore document ID for the chat
     private var userId: String
-    private var listenerTask: Task<Void, Never>?  // async listener for message updates
+    private let peerId: UUID?                      // explicit peer, else derived from the conversation
+    private var conversationKey: SymmetricKey?     // nil until the peer key resolves
+    private var rawMessages: [Message] = []        // ciphertext as received
+    private var listenerTask: Task<Void, Never>?
 
     // MARK: Init
-    /// - Description: Sets up a new chat view model for a given conversation and user.
-    /// Starts listening to messages immediately.
-    ///
-    /// - Parameters:
-    ///   - conversationId: The Firestore conversation document ID
-    ///   - userId: The ID of the user currently in the chat
-    init(conversationId: String, userId: String) {
+    init(conversationId: String, userId: String, peerId: UUID? = nil) {
         self.conversationId = conversationId
         self.userId = userId
+        self.peerId = peerId
         startListening()
+        Task { await prepareKey() }
     }
-    
+
+    // MARK: - E2E key setup
+
+    /// Resolves the peer (explicit or from the conversation participants),
+    /// fetches their public key, and derives the shared conversation key.
+    private func prepareKey() async {
+        var peer = peerId
+        if peer == nil {
+            let parts = (try? await repo.fetchParticipants(conversationId: conversationId)) ?? []
+            peer = parts
+                .first { $0.lowercased() != userId.lowercased() }
+                .flatMap { UUID(uuidString: $0) }
+        }
+        guard let peer, let peerKey = await KeyDirectory.shared.publicKey(for: peer) else { return }
+
+        conversationKey = try? CryptoService.shared.conversationKey(
+            conversationId: conversationId,
+            peerPublicKeyBase64: peerKey
+        )
+        applyDecryption()
+    }
+
+    /// Rebuilds `messages` from `rawMessages`, decrypting with the conversation
+    /// key when available. Before the key resolves we surface the raw body so
+    /// legacy/plaintext conversations still read.
+    private func applyDecryption() {
+        messages = rawMessages.map { message in
+            var copy = message
+            if let key = conversationKey {
+                copy.decryptedText = CryptoService.shared.open(message.text, key: key)
+            } else {
+                copy.decryptedText = message.text
+            }
+            return copy
+        }
+    }
 
     // MARK: FUNCTION: startListening
-    /// - Description: Begins streaming messages from Firestore in real-time.
-    /// Automatically updates the `messages` array whenever new data comes in.
     private func startListening() {
         listenerTask = Task {
-            do {
-                for await newMessages in repo.listenMessages(conversationId: conversationId, forUser: userId) {
-                    await MainActor.run {
-                        let oldCount = self.messages.count
-                        self.messages = newMessages
+            for await newMessages in repo.listenMessages(conversationId: conversationId, forUser: userId) {
+                await MainActor.run {
+                    self.rawMessages = newMessages
+                    self.applyDecryption()
 
-                        // Show notification if new message from other user
-                        if let last = newMessages.last, last.senderId != self.userId,
-                           last.id != self.getLastNotifiedId() {
-                            
-                            // store so it NEVER fires again for this message
-                            self.setLastNotifiedId(last.id)
-                            
-                            // show local notification
-                            NotificationManager.shared
-                                .showInAppNotification(for: last, conversationId: self.conversationId)
-                        }
+                    // Notify on a new incoming message (payload is ciphertext).
+                    if let last = newMessages.last, last.senderId != self.userId,
+                       last.id != self.getLastNotifiedId() {
+                        self.setLastNotifiedId(last.id)
+                        NotificationManager.shared
+                            .showInAppNotification(for: last, conversationId: self.conversationId)
                     }
                 }
-            } catch {
-                print("ChatViewModel listener error:", error)
             }
         }
     }
-    
 
     // MARK: FUNCTION: sendMessage
-    /// - Description: Sends a new message in the current conversation.
-    /// Wraps Firestore calls in a background Task to avoid blocking the UI.
-    ///
-    /// - Parameters:
-    ///   - text: The message body
-    ///   - senderId: The UUID/string ID of the sender
-    ///   - senderName: Display name of the sender
+    /// Encrypts the body (when a key is available) and sends ciphertext, with a
+    /// privacy-preserving conversation preview. Falls back to plaintext only if
+    /// the peer hasn't published a key yet.
     func sendMessage(_ text: String, senderId: String, senderName: String) {
         Task {
+            let bodyToStore: String
+            let preview: String?
+            if let key = conversationKey, let sealed = try? CryptoService.shared.seal(text, key: key) {
+                bodyToStore = sealed
+                preview = "🔒 Encrypted message"
+            } else {
+                bodyToStore = text
+                preview = nil
+            }
+
             let msg = Message(
                 senderId: senderId.lowercased(),
                 senderName: senderName,
-                text: text,
+                text: bodyToStore,
                 time: Date()
             )
-            try? await repo.sendMessage(conversationId: conversationId, message: msg)
+            try? await repo.sendMessage(conversationId: conversationId, message: msg, lastMessagePreview: preview)
         }
     }
-    
-    
+
     private func getLastNotifiedId() -> String? {
         UserDefaults.standard.string(forKey: "lastNotified_\(conversationId)")
     }
@@ -91,5 +121,4 @@ class ChatViewModel: ObservableObject {
     private func setLastNotifiedId(_ id: String?) {
         UserDefaults.standard.set(id, forKey: "lastNotified_\(conversationId)")
     }
-    
 }

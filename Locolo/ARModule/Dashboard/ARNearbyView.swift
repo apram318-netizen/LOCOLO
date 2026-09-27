@@ -12,7 +12,7 @@ import SwiftUI
 import MapKit
 
 struct ARNearbyView: View {
-    let onDismiss: () -> Void
+    var onDismiss: (() -> Void)? = nil
 
     @StateObject private var vm = MapViewModel()
     @EnvironmentObject private var dashboardState: ARDashboardState

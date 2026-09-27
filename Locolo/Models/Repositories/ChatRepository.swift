@@ -110,19 +110,31 @@ class ChatRepository {
     ///   - conversationId: The Firestore document ID of the conversation
     ///   - message: The `Message` object to send
     /// - Throws: If Firestore write fails
-    func sendMessage(conversationId: String, message: Message) async throws {
+    /// - Parameters:
+    ///   - lastMessagePreview: what to store as the conversation preview. For
+    ///     E2E chats pass a privacy-preserving placeholder so the server never
+    ///     holds plaintext; defaults to the message body for legacy callers.
+    func sendMessage(conversationId: String, message: Message, lastMessagePreview: String? = nil) async throws {
         let ref = db.collection("conversations").document(conversationId)
         try await ref.collection("messages").addDocument(data: [
             "senderId": message.senderId.lowercased(),
             "senderName": message.senderName,
-            "text": message.text,
+            "text": message.text,   // ciphertext when E2E is active
             "time": Timestamp(date: message.time)
         ])
         try await ref.setData([
-            "lastMessage": message.text,
+            "lastMessage": lastMessagePreview ?? message.text,
             "updatedAt": Timestamp(date: message.time),
             "deletedBy": []  // clear soft deletes when chat resumes
         ], merge: true)
+    }
+
+    // MARK: FUNCTION: fetchParticipants
+    /// - Description: Returns the participant ids of a conversation, so the chat
+    /// layer can identify the peer to derive an E2E key with. (WS6)
+    func fetchParticipants(conversationId: String) async throws -> [String] {
+        let snap = try await db.collection("conversations").document(conversationId).getDocument()
+        return (snap.data()?["participants"] as? [String]) ?? []
     }
     
     

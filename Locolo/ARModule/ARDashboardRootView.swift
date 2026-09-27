@@ -11,6 +11,11 @@
 import SwiftUI
 
 struct ARDashboardRootView: View {
+    /// When true the AR module IS the whole app (launched as root), so there is
+    /// nothing to dismiss back to and the header exit affordance is hidden.
+    /// When false it behaves as a modal presented over the legacy app.
+    var isRootExperience: Bool = false
+
     @StateObject private var dashboardState = ARDashboardState()
     @EnvironmentObject var userVM: UserViewModel
     @EnvironmentObject var wishlistVM: WishlistViewModel
@@ -57,15 +62,18 @@ struct ARDashboardRootView: View {
 
     @ViewBuilder
     private func tabContent(_ tab: ARTab) -> some View {
+        // As the root experience there is nowhere to exit to, so we pass no
+        // dismiss handler and the header hides its exit button.
+        let exit: (() -> Void)? = isRootExperience ? nil : { dismiss() }
         switch tab {
         case .explore:
-            ARExploreView(onDismiss: { dismiss() })
+            ARExploreView(onDismiss: exit)
         case .nearby:
-            ARNearbyView(onDismiss: { dismiss() })
+            ARNearbyView(onDismiss: exit)
         case .search:
-            ARSearchView(onDismiss: { dismiss() })
+            ARSearchView(onDismiss: exit)
         case .profile:
-            ARCreatorDashboardView(onDismiss: { dismiss() })
+            ARCreatorDashboardView(onDismiss: exit)
         }
     }
 
@@ -85,6 +93,12 @@ struct ARDashboardRootView: View {
         case .wishlist:
             WishlistView()
                 .navigationBarTitleDisplayMode(.inline)
+        case .profile(let userId):
+            CreatorProfileView(userId: userId)
+        case .followList(let userId, let followers):
+            FollowListView(userId: userId, showingFollowers: followers)
+        case .conversations:
+            ARMessagesView()
         }
     }
 }

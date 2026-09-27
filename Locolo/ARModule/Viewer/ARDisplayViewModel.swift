@@ -2,10 +2,19 @@
 //  ARDisplayViewModel.swift
 //  Locolo
 //
-//  This file controls AR GeoTracking, GPS, and RealityKit placement.
-//  It runs location updates, checks AR support, starts the AR session,
-//  listens for tracking status, loads assets from Supabase,
-//  and places all 3D models at real world coordinates.
+//  This file controls AR asset placement, GPS, and RealityKit rendering.
+//  It supports two placement modes so the viewer works *everywhere*:
+//
+//    1. GeoTracking mode  — Apple's ARGeoTrackingConfiguration. Most
+//       accurate, but only available in cities Apple has mapped.
+//    2. GPS / World mode  — ARWorldTrackingConfiguration with a
+//       gravity+heading aligned world. Assets are placed by computing
+//       each one's bearing and distance from the user, so this works
+//       anywhere with a GPS fix and a compass.
+//
+//  We prefer GeoTracking when it's available and localizes quickly, and
+//  fall back to GPS mode otherwise (unsupported region, unavailable
+//  area, or GeoTracking that just won't localize in time).
 //
 
 import Foundation
@@ -18,17 +27,74 @@ import Combine
 @MainActor
 class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate, ARSessionDelegate {
 
+    // MARK: Placement mode
+    enum TrackingMode {
+        case geo     // ARGeoTrackingConfiguration (geo-anchored)
+        case world   // ARWorldTrackingConfiguration (GPS + heading placement)
+    }
+
     // MARK: Published user state
     @Published var statusMessage: String?
     @Published var userLocation: CLLocation?
     @Published var isLocalized = false
+    @Published var trackingMode: TrackingMode = .geo
     @Published var nearbyAssets: [DigitalAsset] = []
     @Published var listeningHint: String?
+
+    /// Set when camera or location permission is denied, so the view can offer
+    /// an "Open Settings" path instead of a dead end. (WS3)
+    @Published var permissionDenied = false
+    /// Set when we can't get going (no GPS fix, etc.) and a manual retry helps. (WS3)
+    @Published var showRetry = false
+
+    /// Where we last fetched assets from; when the user walks past
+    /// `refetchDistanceMeters` we reload so newly-nearby assets appear. (WS3)
+    private var lastFetchOrigin: CLLocation?
+    private let refetchDistanceMeters: Double = 75
+    /// Fires if no GPS fix arrives shortly after we start, to surface a retry. (WS3)
+    private var noFixTask: Task<Void, Never>?
+
+    /// Human-readable badge for the active placement mode, shown once ready.
+    var trackingModeLabel: String {
+        switch trackingMode {
+        case .geo:   return "Geo-anchored"
+        case .world: return "GPS mode"
+        }
+    }
 
     // Tracks placed asset ids
     private var placedIds = Set<UUID>()
 
     private var cancellables = Set<AnyCancellable>()
+
+    /// Model-load Combine tokens, kept SEPARATE from `cancellables`. A
+    /// geo→world fallback clears `cancellables`, and previously that also
+    /// cancelled any USDZ load in flight, stranding half-placed assets. These
+    /// tokens survive a mode switch. (WS3.7)
+    private var modelLoadTokens = Set<AnyCancellable>()
+
+    /// De-duplicates concurrent downloads of the same USDZ: the first placement
+    /// that needs a remote URL owns the download; later placements await the
+    /// same task instead of re-fetching the bytes. (WS8)
+    private var inFlightDownloads: [URL: Task<URL, Error>] = [:]
+
+    /// Upper bound on entities kept in the scene at once. We place the nearest
+    /// N assets and skip the rest so memory stays bounded in dense areas. (WS8)
+    private let maxPlacedEntities = 40
+
+    /// The GPS location that corresponds to the AR world origin. In GPS mode
+    /// all asset offsets are measured from here, since world anchors are
+    /// positioned relative to where the session started, not the live camera.
+    private var worldOriginLocation: CLLocation?
+
+    /// If GeoTracking is supported but never localizes, this task flips us to
+    /// GPS mode so the user is never left staring at an empty camera.
+    private var geoFallbackTask: Task<Void, Never>?
+    private let geoFallbackTimeout: UInt64 = 25_000_000_000 // 25s in nanoseconds
+
+    // How far out we still trust GPS/heading placement. Beyond this, small GPS
+    // errors turn into large angular errors, so we skip those assets.
+    private let maxWorldPlacementMeters: Double = 250
 
     // MARK: Internal system objects
     var arView: ARView?
@@ -53,9 +119,12 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
 
 
     // MARK: Ask for location permission and start GPS
-    /// - Description: Requests permission and starts GPS updates. Needed before AR GeoTracking can work.
+    /// - Description: Requests permission and starts GPS updates. Needed before
+    /// either placement mode can work.
     func startLocationUpdates() {
         statusMessage = "Requesting location permission"
+        permissionDenied = false
+        showRetry = false
 
         switch locationManager.authorizationStatus {
 
@@ -63,50 +132,97 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
             locationManager.requestWhenInUseAuthorization()
 
         case .denied, .restricted:
-            statusMessage = "Location permission denied"
+            statusMessage = "Location access is off. Turn it on in Settings to place and see AR here."
+            permissionDenied = true
 
         case .authorizedWhenInUse, .authorizedAlways:
             locationManager.desiredAccuracy = kCLLocationAccuracyBest
             locationManager.startUpdatingLocation()
+            armNoFixFallback()
 
         @unknown default:
             break
         }
     }
 
+    /// Manual retry from the recovery UI: restart the whole flow. (WS3)
+    func retry() {
+        resetARState()
+        startLocationUpdates()
+    }
 
-    // MARK: Location delegate
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        if manager.authorizationStatus == .authorizedAlways || manager.authorizationStatus == .authorizedWhenInUse {
-            statusMessage = "Finding your location"
-            manager.startUpdatingLocation()
+    /// If no GPS fix arrives within ~10s, fall back to the last known location
+    /// when possible, otherwise surface a retry so the user isn't stuck. (WS3)
+    private func armNoFixFallback() {
+        noFixTask?.cancel()
+        noFixTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard let self, !Task.isCancelled, self.userLocation == nil else { return }
+            if let last = self.locationManager.location {
+                self.userLocation = last
+                self.statusMessage = "Using your last known location"
+                if self.arView?.session.configuration == nil { self.chooseTrackingMode() }
+            } else {
+                self.statusMessage = "Couldn't get your location. Check you're outdoors with a clear sky, then retry."
+                self.showRetry = true
+            }
         }
     }
 
-    
-    
+
+    // MARK: Location delegate
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            permissionDenied = false
+            statusMessage = "Finding your location"
+            manager.startUpdatingLocation()
+            armNoFixFallback()
+        case .denied, .restricted:
+            statusMessage = "Location access is off. Turn it on in Settings to place and see AR here."
+            permissionDenied = true
+        default:
+            break
+        }
+    }
+
+
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         statusMessage = "Location error: \(error.localizedDescription)"
     }
 
-    
-    
+
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last else { return }
         userLocation = loc
+        noFixTask?.cancel()      // we have a fix now
+        showRetry = false
 
+        // Kick off tracking once, as soon as we have a first fix and no session.
         if !isLocalized && arView?.session.configuration == nil {
             statusMessage = "Location found. Checking AR support"
-            checkGeoTrackingSupport()
+            chooseTrackingMode()
+        }
+
+        // Re-fetch as the user walks, so newly-nearby assets appear without a
+        // session restart. placedIds prevents re-placing what's already up. (WS3)
+        if isLocalized, let origin = lastFetchOrigin, loc.distance(from: origin) > refetchDistanceMeters {
+            lastFetchOrigin = loc
+            Task {
+                await fetchNearbyAssets()
+                placeAllAssets()
+            }
         }
     }
 
 
-    // MARK: Check AR GeoTracking support
-    /// - Description: Checks if this device and region support GeoTracking.
-    func checkGeoTrackingSupport() {
+    // MARK: Choose a placement mode
+    /// - Description: Prefers GeoTracking where it's supported and available;
+    /// otherwise starts GPS mode immediately so the viewer still works.
+    func chooseTrackingMode() {
         guard ARGeoTrackingConfiguration.isSupported else {
-            statusMessage = "GeoTracking not supported"
+            statusMessage = "Using GPS mode"
+            startWorldTrackingSession()
             return
         }
 
@@ -115,64 +231,100 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         ARGeoTrackingConfiguration.checkAvailability { [weak self] available, error in
             guard let self = self else { return }
 
-            if let error = error {
-                self.statusMessage = "AR not available: \(error.localizedDescription)"
+            if error != nil || !available {
+                // Supported hardware, but no geo data for this area → GPS mode.
+                self.statusMessage = "Using GPS mode"
+                self.startWorldTrackingSession()
                 return
             }
 
-            if !available {
-                self.statusMessage = "GeoTracking not available in this area"
-                return
-            }
-
-            self.startARSession()
+            self.startGeoTrackingSession()
         }
     }
 
-    
 
-    // MARK: Start AR session
-    /// - Description: Creates and runs the geotracking session. Resets tracking to avoid old state.
-    func startARSession() {
+    // MARK: Start GeoTracking session
+    /// - Description: Runs the geo-anchored session and arms a timeout that
+    /// drops to GPS mode if it never localizes.
+    func startGeoTrackingSession() {
         guard let arView = arView else { return }
 
         cancellables.removeAll()
+        trackingMode = .geo
 
         let config = ARGeoTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
         config.environmentTexturing = .automatic
 
         statusMessage = "Starting AR session"
+        arView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        arView.session.delegate = self
 
+        armGeoFallback()
+    }
+
+
+    /// - Description: If GeoTracking hasn't localized within the timeout, switch
+    /// to GPS mode. Cancelled the moment we localize.
+    private func armGeoFallback() {
+        geoFallbackTask?.cancel()
+        geoFallbackTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: self?.geoFallbackTimeout ?? 25_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            if self.trackingMode == .geo, !self.isLocalized {
+                self.statusMessage = "Couldn't geo-localize. Switching to GPS mode"
+                self.startWorldTrackingSession()
+            }
+        }
+    }
+
+
+    // MARK: Start GPS / World-tracking session
+    /// - Description: Runs a gravity+heading aligned world session. With this
+    /// alignment ARKit orients the world so -Z is true north and +X is east,
+    /// letting us place assets from their GPS bearing and distance.
+    func startWorldTrackingSession() {
+        guard let arView = arView else { return }
+
+        geoFallbackTask?.cancel()
+        cancellables.removeAll()
+        trackingMode = .world
+        isLocalized = false
+        placedIds.removeAll()
+        worldOriginLocation = nil
+
+        let config = ARWorldTrackingConfiguration()
+        config.worldAlignment = .gravityAndHeading
+        config.planeDetection = [.horizontal]
+        config.environmentTexturing = .automatic
+
+        statusMessage = "Starting GPS AR. Move your phone to begin"
         arView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
         arView.session.delegate = self
     }
 
 
-    // MARK: Tracking status updates
+    // MARK: GeoTracking status updates (geo mode only)
     func session(_ session: ARSession, didChange geoTrackingStatus: ARGeoTrackingStatus) {
 
         switch geoTrackingStatus.accuracy {
-        case .high:
-            statusMessage = "High accuracy"
-        case .medium:
-            statusMessage = "Medium accuracy"
-        case .low:
-            statusMessage = "Low accuracy"
-        @unknown default:
-            break
+        case .high:   statusMessage = "High accuracy"
+        case .medium: statusMessage = "Medium accuracy"
+        case .low:    statusMessage = "Low accuracy"
+        @unknown default: break
         }
 
         switch geoTrackingStatus.state {
 
         case .localized:
             if !isLocalized {
+                geoFallbackTask?.cancel()
                 isLocalized = true
                 statusMessage = "Localized. Loading assets"
 
                 Task {
                     await fetchNearbyAssets()
-                    placeAllAssetsIfLocalized()
+                    placeAllAssets()
                 }
             }
 
@@ -183,7 +335,11 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
             statusMessage = "Localizing. Move around"
 
         case .notAvailable:
-            statusMessage = "Not available here"
+            // Region flipped to unavailable mid-session — fall back.
+            if trackingMode == .geo, !isLocalized {
+                statusMessage = "Geo unavailable here. Switching to GPS mode"
+                startWorldTrackingSession()
+            }
 
         @unknown default:
             statusMessage = "Searching"
@@ -192,22 +348,44 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
 
 
     // MARK: Reset AR state
-    /// - Description: Clears local tracking and resets placement state.
-    /// Also tears down trigger detectors (mic, motion sensors).
+    /// - Description: Clears tracking and placement state and tears down the
+    /// trigger detectors (mic, motion sensors).
     func resetARState() {
+        geoFallbackTask?.cancel()
+        noFixTask?.cancel()
         userLocation = nil
         isLocalized = false
+        trackingMode = .geo
         nearbyAssets = []
         placedIds.removeAll()
+        worldOriginLocation = nil
+        lastFetchOrigin = nil
+        modelLoadTokens.removeAll()
+        inFlightDownloads.removeAll()
+        permissionDenied = false
+        showRetry = false
         triggerEngine.teardown()
         statusMessage = "Finding location"
     }
 
 
-    // MARK: Frame updates (proximity triggers)
-    /// - Description: Checks proximity triggers against the camera position,
-    /// throttled to every 10th frame.
+    // MARK: Frame updates
+    /// - Description: In GPS mode, waits for world tracking to stabilize, then
+    /// loads and places assets. Also runs proximity triggers (throttled).
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
+
+        // GPS-mode localization: place once the camera is tracking normally.
+        if trackingMode == .world, !isLocalized, userLocation != nil,
+           case .normal = frame.camera.trackingState {
+            worldOriginLocation = userLocation
+            isLocalized = true
+            statusMessage = "Ready (GPS mode). Loading assets"
+            Task {
+                await fetchNearbyAssets()
+                placeAllAssets()
+            }
+        }
+
         frameCount += 1
         guard frameCount % 10 == 0, triggerEngine.hasProximityAssets else { return }
 
@@ -218,14 +396,54 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         triggerEngine.updateProximity(cameraPosition: cameraPosition)
     }
 
-    
+
     func session(_ session: ARSession, didFailWithError error: Error) {
         statusMessage = "AR failed: \(error.localizedDescription)"
+        // A denied camera surfaces here as an ARKit sensor-unavailable error.
+        if let arError = error as? ARError, arError.code == .cameraUnauthorized {
+            permissionDenied = true
+            statusMessage = "Camera access is off. Turn it on in Settings to use AR."
+        }
+    }
+
+    // MARK: Camera tracking quality (WS3)
+    /// - Description: Turns ARKit's limited-tracking reasons into short,
+    /// actionable hints instead of leaving the user on a frozen scene.
+    func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+        switch camera.trackingState {
+        case .normal:
+            // Don't stomp on a more useful message once assets are up.
+            if !isLocalized { statusMessage = "Tracking. Look around" }
+        case .notAvailable:
+            statusMessage = "AR tracking unavailable"
+        case .limited(let reason):
+            switch reason {
+            case .excessiveMotion:     statusMessage = "Slow down — moving too fast"
+            case .insufficientFeatures: statusMessage = "Point at a more textured area"
+            case .initializing:        statusMessage = "Starting AR — move your phone gently"
+            case .relocalizing:        statusMessage = "Reconnecting to your surroundings"
+            @unknown default:          statusMessage = "Adjusting…"
+            }
+        }
+    }
+
+    // MARK: Interruptions (WS3)
+    func sessionWasInterrupted(_ session: ARSession) {
+        statusMessage = "AR paused"
+    }
+
+    func sessionInterruptionEnded(_ session: ARSession) {
+        statusMessage = "Resuming AR"
+        // Re-run the appropriate configuration so tracking recovers cleanly.
+        switch trackingMode {
+        case .geo:   startGeoTrackingSession()
+        case .world: startWorldTrackingSession()
+        }
     }
 
 
     // MARK: Fetch assets from RPC
-    /// - Description: Calls the Supabase function get_nearby_assets_full to load assets near the user.
+    /// - Description: Calls get_nearby_assets_full to load assets near the user.
     func fetchNearbyAssets(radiusMeters: Double = 200) async {
         guard let loc = userLocation else {
             statusMessage = "No location"
@@ -245,144 +463,286 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
                 .execute()
                 .value
 
-            await MainActor.run {
-                nearbyAssets = assets
-                statusMessage = "Loaded \(assets.count) assets"
-            }
+            nearbyAssets = assets
+            lastFetchOrigin = loc     // anchor for walk-based re-fetch (WS3)
+            statusMessage = assets.isEmpty
+                ? "No AR assets nearby yet"
+                : "Loaded \(assets.count) asset\(assets.count == 1 ? "" : "s")"
 
         } catch {
-            await MainActor.run {
-                statusMessage = "Failed to load assets"
-            }
+            statusMessage = "Failed to load assets"
         }
     }
 
 
-    
-    // MARK: Place a single model
-    /// - Description: Downloads the model, loads it with RealityKit, sets scale and rotation, and attaches it to a geo anchor.
-    func placeAsset(
+    // MARK: Place all nearby assets
+    /// - Description: Dispatches placement based on the active mode.
+    func placeAllAssets() {
+        guard let arView = arView else { return }
+
+        #if targetEnvironment(simulator)
+        print("Simulator skip: AR placement is device-only")
+        return
+        #else
+        // Place the nearest assets first and cap the total so memory stays
+        // bounded where lots of assets cluster together. (WS8)
+        let ordered = nearestAssets(limit: maxPlacedEntities)
+        switch trackingMode {
+        case .geo:
+            let cam = arView.session.currentFrame?.camera.transform
+            for asset in ordered {
+                placeAssetGeo(asset, in: arView, cameraTransform: cam)
+            }
+        case .world:
+            for asset in ordered {
+                placeAssetWorld(asset, in: arView)
+            }
+        }
+        #endif
+    }
+
+    /// - Description: `nearbyAssets` ordered nearest-first (from the world
+    /// origin, else the live location) and capped to `limit`. (WS8)
+    private func nearestAssets(limit: Int) -> [DigitalAsset] {
+        guard let origin = worldOriginLocation ?? userLocation else {
+            return Array(nearbyAssets.prefix(limit))
+        }
+        return nearbyAssets
+            .sorted { horizontalDistance(of: $0, from: origin) < horizontalDistance(of: $1, from: origin) }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    private func horizontalDistance(of asset: DigitalAsset, from origin: CLLocation) -> Double {
+        guard let lat = asset.latitude, let lon = asset.longitude else { return .greatestFiniteMagnitude }
+        return origin.distance(from: CLLocation(latitude: lat, longitude: lon))
+    }
+
+
+    // MARK: Place a single model — GeoTracking
+    /// - Description: Anchors the model at its real-world coordinate using an
+    /// ARGeoAnchor at the altitude it was posted at (with a sanity clamp).
+    func placeAssetGeo(
         _ asset: DigitalAsset,
         in arView: ARView,
         cameraTransform: simd_float4x4?
     ) {
-
         if placedIds.contains(asset.id) { return }
+
+        guard let lat = asset.latitude, let lon = asset.longitude else { return }
+
+        let altitude = resolvedAltitude(for: asset, baseline: userLocation?.altitude ?? 0)
+        let coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+
+        #if targetEnvironment(simulator)
+        return
+        #else
         placedIds.insert(asset.id)
+
+        let geoAnchor = ARGeoAnchor(name: asset.name ?? "", coordinate: coord, altitude: altitude)
+        arView.session.add(anchor: geoAnchor)
+        let anchorEntity = AnchorEntity(anchor: geoAnchor)
+
+        loadModel(for: asset) { [weak self] entity in
+            guard let self, let arView = self.arView else { return }
+            anchorEntity.addChild(entity)
+            arView.scene.addAnchor(anchorEntity)
+            self.finishPlacement(of: asset, entity: entity)
+        }
+        #endif
+    }
+
+
+    // MARK: Place a single model — GPS / World tracking
+    /// - Description: Computes the asset's east/north offset from the world
+    /// origin location and drops it at that point in the gravity+heading
+    /// aligned world (so -Z is north, +X is east).
+    func placeAssetWorld(_ asset: DigitalAsset, in arView: ARView) {
+        if placedIds.contains(asset.id) { return }
 
         guard
             let lat = asset.latitude,
             let lon = asset.longitude,
-            let url = URL(string: asset.fileUrl)
+            let origin = worldOriginLocation
         else { return }
 
-        // Anchor at the altitude the asset was *posted* at, falling back to the
-        // viewer's altitude for legacy assets. A stored value more than 30 m
-        // from the viewer is treated as a bad GPS fix and ignored.
-        let viewerAltitude = userLocation?.altitude ?? 0
-        let altitude: Double
-        if let stored = asset.altitudeM, abs(stored - viewerAltitude) <= 30 {
-            altitude = stored
-        } else {
-            altitude = viewerAltitude
+        let assetCoord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        let assetGround = CLLocation(latitude: lat, longitude: lon)
+        let originGround = CLLocation(latitude: origin.coordinate.latitude,
+                                      longitude: origin.coordinate.longitude)
+
+        let distance = originGround.distance(from: assetGround) // horizontal meters
+        guard distance <= maxWorldPlacementMeters else {
+            print("Skipping \(asset.name ?? "asset"): \(Int(distance)) m out of range")
+            return
         }
-        let coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+
+        let bearing = bearing(from: origin.coordinate, to: assetCoord) // radians CW from north
+        let altitude = resolvedAltitude(for: asset, baseline: origin.altitude)
+
+        // gravity+heading world: +X = east, +Y = up, -Z = north.
+        let x = Float(distance * sin(bearing))
+        let z = Float(-distance * cos(bearing))
+        let y = Float(altitude - origin.altitude)
+
+        var transform = matrix_identity_float4x4
+        transform.columns.3 = SIMD4<Float>(x, y, z, 1)
 
         #if targetEnvironment(simulator)
-        print("Simulator cannot place geo anchors")
         return
         #else
+        placedIds.insert(asset.id)
+        let anchorEntity = AnchorEntity(world: transform)
 
-        let geoAnchor = ARGeoAnchor(name: asset.name ?? "", coordinate: coord, altitude: altitude)
-        arView.session.add(anchor: geoAnchor)
-
-        let anchorEntity = AnchorEntity(anchor: geoAnchor)
+        loadModel(for: asset) { [weak self] entity in
+            guard let self, let arView = self.arView else { return }
+            anchorEntity.addChild(entity)
+            arView.scene.addAnchor(anchorEntity)
+            self.finishPlacement(of: asset, entity: entity)
+        }
         #endif
+    }
 
+
+    // MARK: Shared model loading
+    /// - Description: Downloads the USDZ, loads it, applies the poster's scale
+    /// and rotation, then hands the ready entity to the mode-specific attach
+    /// closure. Placement bookkeeping is shared via finishPlacement.
+    private func loadModel(for asset: DigitalAsset, attach: @escaping (Entity) -> Void) {
+        guard let url = URL(string: asset.fileUrl) else {
+            placedIds.remove(asset.id)
+            return
+        }
 
         Task {
             do {
-                let (data, response) = try await URLSession.shared.data(from: url)
+                // Reuse the on-disk cache and coalesce concurrent downloads,
+                // so re-entering the viewer near the same assets is instant and
+                // duplicate assets don't fetch the same bytes twice. (WS8)
+                let localURL = try await self.localModelURL(for: url)
 
-                if let http = response as? HTTPURLResponse, http.statusCode != 200 { return }
-
-                let temp = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(UUID().uuidString + ".usdz")
-                try data.write(to: temp)
-
-                let request = Entity.loadAsync(contentsOf: temp)
-
+                let request = Entity.loadAsync(contentsOf: localURL)
                 request
-                    .sink(receiveCompletion: { c in
-                        if case let .failure(error) = c {
+                    .sink(receiveCompletion: { completion in
+                        if case let .failure(error) = completion {
                             print("Load error", error)
                         }
                     }, receiveValue: { [weak self] entity in
-                        guard let self = self else { return }
-
-                        let sx = Float(asset.scaleX ?? 1)
-                        let sy = Float(asset.scaleY ?? 1)
-                        let sz = Float(asset.scaleZ ?? 1)
-                        entity.scale = [sx, sy, sz]
-
-                        let rx = Float(asset.rotationX ?? 0) * .pi / 180
-                        let ry = Float(asset.rotationY ?? 0) * .pi / 180
-                        let rz = Float(asset.rotationZ ?? 0) * .pi / 180
-
-                        let rotX = simd_quatf(angle: rx, axis: [1, 0, 0])
-                        let rotY = simd_quatf(angle: ry, axis: [0, 1, 0])
-                        let rotZ = simd_quatf(angle: rz, axis: [0, 0, 1])
-
-                        entity.transform.rotation = rotZ * rotY * rotX
-
-                        #if !targetEnvironment(simulator)
-                        anchorEntity.addChild(entity)
-                        arView.scene.addAnchor(anchorEntity)
-                        #endif
-
-                        // Collision shapes are required for tap hit-testing;
-                        // the engine then runs this asset's chosen trigger.
-                        entity.generateCollisionShapes(recursive: true)
-                        self.triggerEngine.register(asset: asset, rootEntity: entity)
-
-                        // Mark someone else's asset as explored for the AR profile
-                        if let idString = SupabaseManager.shared.currentUserId,
-                           let viewerId = UUID(uuidString: idString),
-                           viewerId != asset.userId {
-                            Task {
-                                await SeenAssetsRepository.shared.recordSeen(
-                                    userId: viewerId, assetId: asset.id
-                                )
-                            }
-                        }
-
-                        self.statusMessage = "Placed \(asset.name ?? "asset")"
+                        guard let self else { return }
+                        self.applyStoredTransform(to: entity, from: asset)
+                        attach(entity)
                     })
-                    .store(in: &cancellables)
+                    .store(in: &self.modelLoadTokens)   // survives a geo→world switch (WS3.7)
 
             } catch {
-                print("Download error:", error)
+                print("Model download/load error:", error)
+                self.placedIds.remove(asset.id)
             }
         }
     }
 
 
-    
-    // MARK: Place all nearby assets
-    /// - Description: Loops through all loaded assets and places them when GeoTracking is ready.
-    func placeAllAssetsIfLocalized() {
-        guard let arView = arView else { return }
-
-        #if targetEnvironment(simulator)
-        print("Simulator skip")
-        return
-        #endif
-
-        let cam = arView.session.currentFrame?.camera.transform
-
-        for asset in nearbyAssets {
-            placeAsset(asset, in: arView, cameraTransform: cam)
+    /// - Description: Resolves a local file URL for a USDZ, serving it from
+    /// `MediaCache` when present, otherwise downloading once and caching it.
+    /// Concurrent requests for the same remote URL share a single download so
+    /// we never fetch the same asset twice at once. (WS8)
+    private func localModelURL(for remoteURL: URL) async throws -> URL {
+        if let cached = MediaCache.shared.localURL(forRemoteURL: remoteURL) {
+            return cached
         }
+
+        if let existing = inFlightDownloads[remoteURL] {
+            return try await existing.value
+        }
+
+        let task = Task<URL, Error> {
+            let (data, response) = try await URLSession.shared.data(from: remoteURL)
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                throw URLError(.badServerResponse)
+            }
+            guard let stored = MediaCache.shared.store(data: data, for: remoteURL, fileExtension: "usdz") else {
+                throw URLError(.cannotCreateFile)
+            }
+            return stored
+        }
+
+        inFlightDownloads[remoteURL] = task
+        defer { inFlightDownloads[remoteURL] = nil }
+        return try await task.value
+    }
+
+
+    /// - Description: Applies the scale + rotation captured when the asset was placed.
+    private func applyStoredTransform(to entity: Entity, from asset: DigitalAsset) {
+        let sx = Float(asset.scaleX ?? 1)
+        let sy = Float(asset.scaleY ?? 1)
+        let sz = Float(asset.scaleZ ?? 1)
+        entity.scale = [sx, sy, sz]
+
+        // Prefer the world-space quaternion captured in the north-aligned
+        // (.gravityAndHeading) frame — both placement modes anchor on a
+        // north-aligned frame (ARGeoAnchor ENU / gravityAndHeading world), so
+        // this reproduces the real-world facing direction across devices. Fall
+        // back to legacy Euler angles for assets placed before WS2. (WS2)
+        if let qx = asset.rotQX, let qy = asset.rotQY, let qz = asset.rotQZ, let qw = asset.rotQW {
+            entity.orientation = simd_quatf(ix: Float(qx), iy: Float(qy), iz: Float(qz), r: Float(qw))
+        } else {
+            let rx = Float(asset.rotationX ?? 0) * .pi / 180
+            let ry = Float(asset.rotationY ?? 0) * .pi / 180
+            let rz = Float(asset.rotationZ ?? 0) * .pi / 180
+
+            let rotX = simd_quatf(angle: rx, axis: [1, 0, 0])
+            let rotY = simd_quatf(angle: ry, axis: [0, 1, 0])
+            let rotZ = simd_quatf(angle: rz, axis: [0, 0, 1])
+            entity.transform.rotation = rotZ * rotY * rotX
+        }
+    }
+
+
+    /// - Description: Post-attach bookkeeping shared by both modes: collision
+    /// shapes for tap hit-testing, trigger registration, "explored" tracking,
+    /// and a status update.
+    private func finishPlacement(of asset: DigitalAsset, entity: Entity) {
+        entity.generateCollisionShapes(recursive: true)
+        triggerEngine.register(asset: asset, rootEntity: entity)
+
+        // Mark someone else's asset as explored for the AR profile.
+        if let idString = SupabaseManager.shared.currentUserId,
+           let viewerId = UUID(uuidString: idString),
+           viewerId != asset.userId {
+            Task {
+                await SeenAssetsRepository.shared.recordSeen(userId: viewerId, assetId: asset.id)
+            }
+        }
+
+        statusMessage = "Placed \(asset.name ?? "asset")"
+    }
+
+
+    // MARK: Geo helpers
+
+    /// - Description: The altitude to anchor at. Uses the poster's stored
+    /// altitude when it's within 30 m of the viewer's baseline (otherwise it's
+    /// treated as a bad GPS fix and we anchor at the baseline).
+    private func resolvedAltitude(for asset: DigitalAsset, baseline: Double) -> Double {
+        if let stored = asset.altitudeM, abs(stored - baseline) <= 30 {
+            return stored
+        }
+        return baseline
+    }
+
+    /// - Description: Initial bearing from one coordinate to another, in
+    /// radians measured clockwise from true north.
+    private func bearing(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) -> Double {
+        let lat1 = from.latitude * .pi / 180
+        let lon1 = from.longitude * .pi / 180
+        let lat2 = to.latitude * .pi / 180
+        let lon2 = to.longitude * .pi / 180
+        let dLon = lon2 - lon1
+
+        let y = sin(dLon) * cos(lat2)
+        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+        return atan2(y, x)
     }
 
 
@@ -412,10 +772,11 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
 //  Apple Geo Anchors
 //  https://developer.apple.com/documentation/arkit/argeoanchor
 //
+//  ARWorldTrackingConfiguration.worldAlignment (.gravityAndHeading)
+//  https://developer.apple.com/documentation/arkit/arconfiguration/worldalignment
+//
+//  Location-based AR placement technique (bearing + distance → local ENU):
+//  based on the approach used by ARKit+CoreLocation (ARCL).
+//
 //  RealityKit async model loading
 //  https://developer.apple.com/documentation/realitykit/entity/loadasync
-//
-// https://youtu.be/-uhCNRMDDVg?si=Oo0mceDPAjgiEZ8B
-//
-// https://youtu.be/hHSbMkhruOg?si=Q1oY_Lfl_9Jg_wn5
-

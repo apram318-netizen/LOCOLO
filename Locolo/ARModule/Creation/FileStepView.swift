@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 struct FileStepView: View {
     @ObservedObject var vm: ARCreateViewModel
     @State private var showPicker = false
+    @State private var showDraw = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -34,6 +35,25 @@ struct FileStepView: View {
             }
 
             Button("Choose File") { showPicker = true }
+
+            HStack {
+                Rectangle().fill(ARDesign.hairline).frame(height: 1)
+                Text("or").font(.caption).foregroundStyle(.secondary)
+                Rectangle().fill(ARDesign.hairline).frame(height: 1)
+            }
+            .padding(.vertical, 2)
+
+            Button {
+                showDraw = true
+            } label: {
+                Label("Draw in the air", systemImage: "hand.draw.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Capsule().fill(AppColors.purplePinkGradient))
+            }
+            .accessibilityHint("Create a 3D drawing with hand gestures")
 
             Button("Upload & Continue") {
                 Task {
@@ -68,6 +88,11 @@ struct FileStepView: View {
             case .failure(let err):
                 vm.error = err.localizedDescription
             }
+        }
+        .fullScreenCover(isPresented: $showDraw) {
+            ARDrawScreen(onFinish: { url in
+                vm.setDrawnFile(url)
+            })
         }
     }
 }

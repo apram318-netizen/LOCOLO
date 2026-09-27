@@ -9,27 +9,9 @@
 
 import Foundation
 import Supabase
+import CoreLocation
 
-// MARK: - Creator (lightweight user row for feed cards)
-
-struct ARCreator: Codable, Identifiable {
-    let id: UUID
-    let username: String
-    let name: String?
-    let avatarUrl: URL?
-    let verifiedFlags: [String: Bool]?
-
-    enum CodingKeys: String, CodingKey {
-        case id = "user_id"
-        case username
-        case name
-        case avatarUrl = "avatar_url"
-        case verifiedFlags = "verified_flags"
-    }
-
-    var isVerified: Bool { verifiedFlags?["blue"] == true }
-    var displayName: String { name ?? username }
-}
+// ARCreator now lives in Models/ARCreator.swift (shared with profiles). (WS4)
 
 // MARK: - View model
 
@@ -53,6 +35,10 @@ final class ARExploreViewModel: ObservableObject {
     }
 
     @Published var featuredAssets: [DigitalAsset] = []
+    /// Server-ranked personalized feed from get_recommended_assets (WS5).
+    /// Empty until loaded / when unavailable — the For You filter falls back
+    /// to a newest-first client sort in that case.
+    @Published var recommendedAssets: [DigitalAsset] = []
     @Published var creators: [UUID: ARCreator] = [:]
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -76,7 +62,10 @@ final class ARExploreViewModel: ObservableObject {
     var feedAssets: [DigitalAsset] {
         switch feedFilter {
         case .forYou:
-            return allAssets.sorted { $0.createdAt > $1.createdAt }
+            // Prefer the server-ranked personalized feed; fall back to newest.
+            return recommendedAssets.isEmpty
+                ? allAssets.sorted { $0.createdAt > $1.createdAt }
+                : recommendedAssets
         case .trending:
             return allAssets.sorted { $0.engagementScore > $1.engagementScore }
         case .nearby:
@@ -124,7 +113,50 @@ final class ARExploreViewModel: ObservableObject {
 
         isLoading = false
 
+        await loadRecommended()
         await loadCreators(for: allAssets)
+    }
+
+    // MARK: Personalized feed (WS5)
+
+    private struct RecParams: Encodable {
+        let p_user: String
+        let p_lat: Double
+        let p_lon: Double
+        let p_radius_meters: Double
+        let p_limit: Int
+    }
+
+    /// Server-ranked "For You" via get_recommended_assets. Needs a signed-in
+    /// user and a location; otherwise (or on error) we leave recommendedAssets
+    /// empty and the feed falls back to a newest-first sort.
+    private func loadRecommended() async {
+        guard
+            let idString = SupabaseManager.shared.currentUserId,
+            let userId = UUID(uuidString: idString)
+        else { return }
+
+        let manager = LocationManager.shared
+        guard let coord = manager.userLocation ?? manager.latestStoredLocation else { return }
+
+        do {
+            let recs: [DigitalAsset] = try await client
+                .rpc("get_recommended_assets", params: RecParams(
+                    p_user: userId.uuidString,
+                    p_lat: coord.latitude,
+                    p_lon: coord.longitude,
+                    p_radius_meters: 50_000,
+                    p_limit: 60
+                ))
+                .execute()
+                .value
+            recommendedAssets = recs
+            // Fold any creators we don't already have into the cache.
+            await loadCreators(for: recs)
+        } catch {
+            // Non-fatal: For You just falls back to the newest-first sort.
+            print("Recommended feed fetch failed:", error.localizedDescription)
+        }
     }
 
     /// One batched query for every distinct creator in the feed.

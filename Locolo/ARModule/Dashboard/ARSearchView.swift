@@ -10,7 +10,7 @@
 import SwiftUI
 
 struct ARSearchView: View {
-    let onDismiss: () -> Void
+    var onDismiss: (() -> Void)? = nil
 
     @StateObject private var vm = ARGalleryViewModel()
     @EnvironmentObject private var dashboardState: ARDashboardState

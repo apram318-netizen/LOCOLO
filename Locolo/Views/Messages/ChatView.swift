@@ -35,7 +35,7 @@ struct ChatView: View {
                                     Text(msg.senderName)
                                         .font(.caption)
                                         .foregroundColor(.gray)
-                                    Text(msg.text)
+                                    Text(msg.displayText)
                                         .padding(10)
                                         .background(msg.senderId == currentUserId ? Color.blue.opacity(0.8) : Color.gray.opacity(0.2))
                                         .cornerRadius(16)

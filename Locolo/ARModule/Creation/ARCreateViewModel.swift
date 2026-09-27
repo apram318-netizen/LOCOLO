@@ -43,6 +43,19 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     @Published var transform: Transform?     // placement rotation/scale from AR
     @Published var location: CLLocation?     // current GPS location
 
+    // World-space placement captured in the north-aligned session (WS2). The
+    // quaternion is the source of truth; Euler is derived only for legacy rows.
+    @Published var capturedWorldRotation: simd_quatf?
+    @Published var capturedWorldScale: SIMD3<Float>?
+    // Live compass accuracy in degrees (from CLHeading). Negative/nil = unusable.
+    @Published var headingAccuracy: Double?
+
+    /// Whether the compass is trustworthy enough to record a facing direction.
+    var hasReliableHeading: Bool {
+        guard let acc = headingAccuracy else { return false }
+        return acc >= 0 && acc <= 20
+    }
+
     // MARK: Details
     @Published var name: String = ""
     @Published var descriptionText: String = ""
@@ -79,6 +92,7 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.requestWhenInUseAuthorization()
         locationManager.startUpdatingLocation()
+        locationManager.startUpdatingHeading()   // compass accuracy gate (WS2)
     }
 
     // MARK: FUNCTION: setPickedFile
@@ -87,6 +101,20 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     func setPickedFile(_ url: URL) {
         localFileURL = url
         fileType = url.pathExtension.lowercased()
+    }
+
+    // MARK: FUNCTION: setDrawnFile (WS7)
+    /// - Description: Accepts a USDZ exported from the hand-draw flow, uploads
+    /// it, and jumps straight to AR placement (drawings have no embedded
+    /// animations, so the animation step is skipped).
+    func setDrawnFile(_ url: URL) {
+        setPickedFile(url)
+        availableAnimations = []
+        selectedAnimationIndex = nil
+        Task {
+            await uploadPickedFileToStorage()
+            if uploadedFileURL != nil { step = .ar }
+        }
     }
 
     // MARK: FUNCTION: setPickedMediaFile
@@ -265,9 +293,19 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     // MARK: FUNCTION: setPlacement
     /// - Description: Saves the AR transform, GPS location, altitude, and exact
     /// address after placement. Moves the flow to the Details step.
-    /// - Parameter transform: The 3D transform captured in AR space
-    func setPlacement(transform: Transform) {
-        self.transform = transform
+    /// - Parameters:
+    ///   - rotationWorld: orientation relative to the north-aligned session.
+    ///   - scale: world-space scale of the placed model.
+    func setPlacement(rotationWorld: simd_quatf, scale: SIMD3<Float>) {
+        capturedWorldRotation = rotationWorld
+        capturedWorldScale = scale
+
+        // Keep a Transform mirror for any legacy readers of `transform`.
+        var t = Transform()
+        t.rotation = rotationWorld
+        t.scale = scale
+        self.transform = t
+
         location = location ?? locationManager.location
 
         // Altitude of the *poster* — stored so viewers anchor the asset at the
@@ -307,14 +345,17 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             print("  No uploaded file URL found.")
             return
         }
-        guard let transformValue = transform else {
+        guard let worldRotation = capturedWorldRotation else {
             error = "AR placement not confirmed."
-            print("  No AR transform available.")
+            print("  No AR placement available.")
             return
         }
 
-        let rotation = transformValue.rotation.toEulerAngles()
-        let scale = transformValue.scale
+        let scale = capturedWorldScale ?? SIMD3<Float>(1, 1, 1)
+        // Legacy Euler columns, stored in DEGREES to match the viewer's Euler
+        // fallback (which multiplies by π/180). The quaternion is authoritative.
+        let eulerRad = worldRotation.toEulerAngles()
+        let rotationDeg = SIMD3<Float>(eulerRad.x, eulerRad.y, eulerRad.z) * (180 / .pi)
         let coord = (location ?? locationManager.location)?.coordinate
         guard let lat = coord?.latitude, let lon = coord?.longitude else {
             error = "No GPS location available."
@@ -332,7 +373,7 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
         }
 
         print(" Location: lat=\(lat), lon=\(lon)")
-        print("   Rotation:", rotation, "Scale:", scale)
+        print("   Rotation (deg):", rotationDeg, "Scale:", scale, "Heading acc:", headingAccuracy ?? -1)
         print("   User ID:", userId)
 
         isBusy = true
@@ -378,16 +419,21 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
                 category: "ar_model",
                 visibility: visibility,
                 location_id: locationId,
-                rotation_x: Double(rotation.x),
-                rotation_y: Double(rotation.y),
-                rotation_z: Double(rotation.z),
+                rotation_x: Double(rotationDeg.x),
+                rotation_y: Double(rotationDeg.y),
+                rotation_z: Double(rotationDeg.z),
                 scale_x: Double(scale.x),
                 scale_y: Double(scale.y),
                 scale_z: Double(scale.z),
                 animation_name: selectedAnimationIndex.flatMap { availableAnimations.indices.contains($0) ? availableAnimations[$0] : nil },
                 animation_index: selectedAnimationIndex,
                 trigger_type: hasTriggerPayload ? triggerType.rawValue : nil,
-                trigger_config: hasTriggerPayload ? currentTriggerConfig() : nil
+                trigger_config: hasTriggerPayload ? currentTriggerConfig() : nil,
+                rot_qx: Double(worldRotation.imag.x),
+                rot_qy: Double(worldRotation.imag.y),
+                rot_qz: Double(worldRotation.imag.z),
+                rot_qw: Double(worldRotation.real),
+                heading_accuracy_deg: headingAccuracy
             )
 
             print(" Uploading asset to 'digital_assets' table...")
@@ -413,6 +459,8 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             uploadedMediaURL = nil
             mediaType = "none"
             transform = nil
+            capturedWorldRotation = nil
+            capturedWorldScale = nil
             name = ""
             descriptionText = ""
             visibility = "public"
@@ -464,6 +512,11 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     /// Updates user’s last known location whenever it changes.
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         location = locations.last
+    }
+
+    /// Tracks live compass accuracy so `hasReliableHeading` can gate placement. (WS2)
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        headingAccuracy = newHeading.headingAccuracy
     }
 }
 
@@ -527,4 +580,10 @@ struct NewAsset: Encodable {
     let animation_index: Int?
     let trigger_type: String?
     let trigger_config: TriggerConfig?
+    // World-space rotation quaternion (north-aligned frame) + compass accuracy (WS2)
+    let rot_qx: Double?
+    let rot_qy: Double?
+    let rot_qz: Double?
+    let rot_qw: Double?
+    let heading_accuracy_deg: Double?
 }

@@ -12,7 +12,7 @@ import SwiftUI
 import Charts
 
 struct ARCreatorDashboardView: View {
-    let onDismiss: () -> Void
+    var onDismiss: (() -> Void)? = nil
 
     @EnvironmentObject var userVM: UserViewModel
     @EnvironmentObject private var dashboardState: ARDashboardState

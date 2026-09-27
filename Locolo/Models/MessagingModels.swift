@@ -12,8 +12,20 @@ struct Message: Identifiable, Codable {
     @DocumentID var id: String?
     var senderId: String
     var senderName: String
+    /// Ciphertext at rest (base64 AES-GCM). E2E encrypted — the server never
+    /// sees plaintext. (WS6)
     var text: String
     var time: Date
+
+    /// Plaintext after client-side decryption. Never persisted / uploaded.
+    var decryptedText: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, senderId, senderName, text, time
+    }
+
+    /// What the UI should show: decrypted text, or a lock if we can't read it.
+    var displayText: String { decryptedText ?? "🔒 Encrypted message" }
 }
 
 

@@ -10,7 +10,7 @@
 import SwiftUI
 
 struct ARExploreView: View {
-    let onDismiss: () -> Void
+    var onDismiss: (() -> Void)? = nil
 
     @StateObject private var vm = ARExploreViewModel()
     @EnvironmentObject private var dashboardState: ARDashboardState
@@ -42,6 +42,9 @@ struct ARExploreView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             ARGlassHeader(title: "AR World", subtitle: "Shared Creative Space", onExit: onDismiss) {
                 HStack(spacing: 8) {
+                    ARHeaderIconButton(icon: "bubble.left.and.bubble.right", label: "Messages") {
+                        dashboardState.path.append(.conversations)
+                    }
                     ARHeaderIconButton(icon: "arkit", label: "Open AR viewer") {
                         dashboardState.path.append(.viewer)
                     }
@@ -58,15 +61,7 @@ struct ARExploreView: View {
     // MARK: - Loading
 
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .tint(Color.purple)
-                .scaleEffect(1.4)
-            Text("Loading AR World...")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ARLoadingView(message: "Loading AR World…")
     }
 
     // MARK: - Featured
@@ -135,11 +130,13 @@ struct ARExploreView: View {
             feedFilterChips
 
             if vm.visibleFeed.isEmpty {
-                Text("No artworks yet. Be the first to place one!")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .frame(maxWidth: .infinity)
+                ARInlineEmptyState(
+                    icon: "sparkles",
+                    title: "No artworks yet",
+                    subtitle: "Be the first to place an AR creation in the world.",
+                    actionTitle: "Create one",
+                    action: { dashboardState.path.append(.create) }
+                )
             } else {
                 LazyVStack(spacing: 16) {
                     ForEach(vm.visibleFeed) { asset in
@@ -147,7 +144,8 @@ struct ARExploreView: View {
                             asset: asset,
                             creator: vm.creator(for: asset),
                             isTrending: vm.isTrending(asset),
-                            onOpenInAR: { dashboardState.path.append(.viewer) }
+                            onOpenInAR: { dashboardState.path.append(.viewer) },
+                            onOpenCreator: { dashboardState.path.append(.profile(userId: asset.userId)) }
                         )
                         .padding(.horizontal, 16)
                         .onTapGesture { selectedAsset = asset }

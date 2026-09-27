@@ -20,7 +20,6 @@
 		D4A66A802E7BAB980058194E /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A7F2E7BAB980058194E /* Realtime */; };
 		D4A66A822E7BAB980058194E /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A812E7BAB980058194E /* Storage */; };
 		D4A66A842E7BAB980058194E /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A832E7BAB980058194E /* Supabase */; };
-		D4A7B8732E8A6CB100A9125F /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = D4A7B8722E8A6CB100A9125F /* MapboxMaps */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -86,7 +85,6 @@
 				D4A66A822E7BAB980058194E /* Storage in Frameworks */,
 				D456D9D32EB1A52E00506516 /* FirebaseStorage in Frameworks */,
 				D456D9CD2EB1A52E00506516 /* FirebaseFirestore in Frameworks */,
-				D4A7B8732E8A6CB100A9125F /* MapboxMaps in Frameworks */,
 				D4A66A802E7BAB980058194E /* Realtime in Frameworks */,
 				D456D9CB2EB1A52E00506516 /* FirebaseAuth in Frameworks */,
 				D456D9D62EB1A5BA00506516 /* MessageKit in Frameworks */,
@@ -175,7 +173,6 @@
 				D4A66A7F2E7BAB980058194E /* Realtime */,
 				D4A66A812E7BAB980058194E /* Storage */,
 				D4A66A832E7BAB980058194E /* Supabase */,
-				D4A7B8722E8A6CB100A9125F /* MapboxMaps */,
 				D456D9CA2EB1A52E00506516 /* FirebaseAuth */,
 				D456D9CC2EB1A52E00506516 /* FirebaseFirestore */,
 				D456D9CE2EB1A52E00506516 /* FirebaseInAppMessaging-Beta */,
@@ -216,7 +213,6 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				D4A66A782E7BAB980058194E /* XCRemoteSwiftPackageReference "supabase-swift" */,
-				D4A7B8712E8A6CB100A9125F /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */,
 				D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				D456D9D42EB1A5BA00506516 /* XCRemoteSwiftPackageReference "MessageKit" */,
 			);
@@ -579,14 +575,6 @@
 				minimumVersion = 2.5.1;
 			};
 		};
-		D4A7B8712E8A6CB100A9125F /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/mapbox/mapbox-maps-ios.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 11.0.0;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -649,11 +637,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D4A66A782E7BAB980058194E /* XCRemoteSwiftPackageReference "supabase-swift" */;
 			productName = Supabase;
-		};
-		D4A7B8722E8A6CB100A9125F /* MapboxMaps */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = D4A7B8712E8A6CB100A9125F /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */;
-			productName = MapboxMaps;
 		};
 /* End XCSwiftPackageProductDependency section */
 

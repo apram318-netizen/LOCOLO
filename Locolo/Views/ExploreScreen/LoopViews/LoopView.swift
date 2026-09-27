@@ -60,7 +60,7 @@ struct LoopsCompactView: View {
 }
 
 
-// MARK: - Expanded View
+
 // MARK: - Expanded View
 struct LoopsExpandedView: View {
     @EnvironmentObject var loopVM: LoopViewModel
