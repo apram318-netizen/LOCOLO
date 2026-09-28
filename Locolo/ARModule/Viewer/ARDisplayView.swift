@@ -168,8 +168,8 @@ struct ARDisplayView: View {
                                 }
                         }
                         .accessibilityLabel("Hype the nearest asset")
-                        .padding(.trailing, 20)
-                        .padding(.bottom, 96)
+                        .padding(.trailing, 26)
+                        .padding(.bottom, 196)   // sits above the snapshot button
                     }
                 }
             }
