@@ -41,6 +41,8 @@ struct AssetDetailSheet: View {
     @State private var showReport = false
     @State private var confirmBlock = false
     @State private var showComments = false
+    @State private var showSendToChat = false
+    @State private var shareToast: String?
 
     private var isHyped: Bool { engagement.isHyped(asset.id) }
     private var hypeCount: Int { engagement.hypeCount(for: asset) }
@@ -118,6 +120,36 @@ struct AssetDetailSheet: View {
                               onOpenProfile: onOpenProfile == nil && onOpenCreator == nil
                                   ? nil : openProfileFromComments)
             }
+            // Instagram-style "send this asset in a message" — pick a person,
+            // the asset is delivered as an E2E-encrypted rich card.
+            .sheet(isPresented: $showSendToChat) {
+                ARNewMessageSheet { creator in
+                    guard let me = userVM.currentUser else { return }
+                    Task {
+                        let ok = await AssetShareService.shared.shareAsset(asset.id, to: creator.id, from: me)
+                        await MainActor.run {
+                            shareToast = ok ? "Sent to \(creator.displayName)" : "Couldn't send — try again"
+                            ARHaptics.success()
+                        }
+                    }
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if let toast = shareToast {
+                    Text(toast)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 18).padding(.vertical, 12)
+                        .background(Capsule().fill(.black.opacity(0.8)))
+                        .padding(.bottom, 40)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .task {
+                            try? await Task.sleep(nanoseconds: 2_200_000_000)
+                            withAnimation { shareToast = nil }
+                        }
+                }
+            }
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: shareToast)
             .onAppear {
                 computeDistance()
                 reverseGeocodeAssetLocation()
@@ -457,12 +489,17 @@ extension AssetDetailSheet {
 extension AssetDetailSheet {
     private var moreMenu: some View {
         Menu {
+            Button {
+                showSendToChat = true
+            } label: {
+                Label("Send in a message", systemImage: "paperplane")
+            }
             ShareLink(
                 item: DeepLinkRouter.assetURL(for: asset.id),
                 subject: Text(asset.name ?? "AR asset on Locolo"),
                 message: Text("Check out \"\(asset.name ?? "this AR asset")\" on Locolo")
             ) {
-                Label("Share", systemImage: "square.and.arrow.up")
+                Label("Share externally…", systemImage: "square.and.arrow.up")
             }
             if !isCurrentUserOwner {
                 Divider()

@@ -19,6 +19,8 @@ struct ChatView: View {
 
     @State private var text = ""
     @State private var searchQuery = ""
+    /// An asset-share card was tapped → open its detail sheet.
+    @State private var openedAsset: DigitalAsset?
 
     init(vm: ChatViewModel, currentUserId: String, currentUserName: String) {
         self._vm = ObservedObject(initialValue: vm)
@@ -74,6 +76,7 @@ struct ChatView: View {
         .background(ARDesign.screenBackground.ignoresSafeArea())
         .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic),
                     prompt: "Search this conversation")
+        .sheet(item: $openedAsset) { AssetDetailSheet(asset: $0) }
     }
 
     // MARK: - Header / banners
@@ -118,6 +121,13 @@ struct ChatView: View {
 
     // MARK: - Bubbles
 
+    /// A shared asset is a message whose whole body is a locolo://asset/<id> link.
+    private func sharedAssetId(in msg: Message) -> UUID? {
+        guard let body = msg.decryptedText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let url = URL(string: body) else { return nil }
+        return DeepLinkRouter.assetId(from: url)
+    }
+
     @ViewBuilder
     private func bubble(for msg: Message) -> some View {
         let isMine = msg.senderId == currentUserId
@@ -125,23 +135,30 @@ struct ChatView: View {
             if isMine { Spacer(minLength: 48) }
 
             VStack(alignment: isMine ? .trailing : .leading, spacing: 3) {
-                Text(msg.displayText)
-                    .font(.subheadline)
-                    .foregroundColor(isMine ? .white : .primary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background {
-                        if isMine {
-                            AppColors.purplePinkGradient
-                        } else {
-                            Rectangle().fill(.ultraThinMaterial)
-                        }
+                if let assetId = sharedAssetId(in: msg) {
+                    // Instagram-style rich asset card instead of a raw link.
+                    AssetShareBubble(assetId: assetId, isMine: isMine) { asset in
+                        openedAsset = asset
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(isMine ? Color.clear : ARDesign.hairline, lineWidth: 1)
-                    )
+                } else {
+                    Text(msg.displayText)
+                        .font(.subheadline)
+                        .foregroundColor(isMine ? .white : .primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background {
+                            if isMine {
+                                AppColors.purplePinkGradient
+                            } else {
+                                Rectangle().fill(.ultraThinMaterial)
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .strokeBorder(isMine ? Color.clear : ARDesign.hairline, lineWidth: 1)
+                        )
+                }
 
                 Text(msg.time.formatted(date: .omitted, time: .shortened))
                     .font(.caption2)
@@ -152,7 +169,7 @@ struct ChatView: View {
             if !isMine { Spacer(minLength: 48) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(isMine ? "You" : msg.senderName): \(msg.displayText)")
+        .accessibilityLabel("\(isMine ? "You" : msg.senderName): \(sharedAssetId(in: msg) != nil ? "shared an AR asset" : msg.displayText)")
     }
 
     // MARK: - Input
@@ -223,5 +240,79 @@ struct ChatView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 14)
         .padding(.bottom, 6)
+    }
+}
+
+// MARK: - Shared asset card (Instagram-style post-in-DM)
+
+/// Renders a shared AR asset as a rich, tappable card. Loads the asset by id
+/// (deep link payload) and shows its thumbnail, name and creator.
+private struct AssetShareBubble: View {
+    let assetId: UUID
+    let isMine: Bool
+    let onOpen: (DigitalAsset) -> Void
+
+    @State private var asset: DigitalAsset?
+    @State private var failed = false
+
+    var body: some View {
+        Button {
+            if let asset { ARHaptics.tick(); onOpen(asset) }
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack {
+                    if let asset {
+                        AssetThumbnailView(asset: asset, cornerRadius: 0)
+                            .aspectRatio(1, contentMode: .fill)
+                    } else if failed {
+                        Image(systemName: "cube.transparent")
+                            .font(.title)
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 150)
+                    } else {
+                        ProgressView().tint(.purple)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 150)
+                    }
+                }
+                .frame(width: 210, height: 210)
+                .clipped()
+
+                HStack(spacing: 6) {
+                    Image(systemName: "arkit")
+                        .font(.caption2)
+                        .foregroundStyle(AppColors.purplePinkGradient)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(asset?.name ?? (failed ? "AR asset unavailable" : "AR asset"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                        if let loc = asset?.displayLocation {
+                            Text(loc).font(.caption2).foregroundColor(.secondary).lineLimit(1)
+                        } else {
+                            Text("Tap to view in Locolo").font(.caption2).foregroundColor(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(10)
+                .frame(width: 210)
+            }
+            .background(Color.adaptive(light: Color(.systemBackground),
+                                       dark: Color(red: 0.10, green: 0.07, blue: 0.18)))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(isMine ? Color.white.opacity(0.25) : ARDesign.hairline, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .task {
+            if asset == nil {
+                let loaded = await DigitalAssetRepository().fetchAsset(id: assetId)
+                if let loaded { asset = loaded } else { failed = true }
+            }
+        }
     }
 }
