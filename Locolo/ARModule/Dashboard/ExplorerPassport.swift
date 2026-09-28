@@ -127,6 +127,7 @@ struct ExplorerPassport {
 
 struct ExplorerPassportCard: View {
     let passport: ExplorerPassport
+    @ObservedObject private var progress = ProgressStore.shared
     @State private var selectedBadge: ExplorerPassport.Badge?
 
     var body: some View {
@@ -149,6 +150,11 @@ struct ExplorerPassportCard: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                    if let server = progress.progress {
+                        Text("Synced · \(server.xp) XP · \(server.streakDays)d streak")
+                            .font(.caption2)
+                            .foregroundColor(.purple)
+                    }
                 }
                 Spacer(minLength: 0)
                 streakPill
@@ -159,6 +165,31 @@ struct ExplorerPassportCard: View {
                 stat(passport.explored, "Explored", icon: "eye")
                 stat(passport.created, "Created", icon: "cube.transparent")
                 stat(passport.hypeReceived, "Hype", icon: "bolt")
+            }
+
+            if progress.questsAvailable && !progress.weekQuests.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("This week")
+                        .font(.caption.weight(.heavy))
+                        .foregroundColor(.secondary)
+                    ForEach(progress.weekQuests.prefix(3)) { quest in
+                        HStack(spacing: 10) {
+                            Image(systemName: quest.completed ? "checkmark.circle.fill" : "circle")
+                                .foregroundColor(quest.completed ? .green : .secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(quest.title)
+                                    .font(.caption.weight(.semibold))
+                                Text("\(min(quest.progress, quest.goal))/\(quest.goal) · +\(quest.xpReward) XP")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            ProgressView(value: quest.fraction)
+                                .tint(.purple)
+                                .frame(width: 48)
+                        }
+                    }
+                }
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -188,6 +219,9 @@ struct ExplorerPassportCard: View {
         .padding(16)
         .arGlassCard(cornerRadius: 22)
         .animation(.easeInOut(duration: 0.2), value: selectedBadge?.id)
+        .task {
+            if progress.weekQuests.isEmpty { await progress.refreshQuests() }
+        }
     }
 
     /// Earned first, then closest to earning.

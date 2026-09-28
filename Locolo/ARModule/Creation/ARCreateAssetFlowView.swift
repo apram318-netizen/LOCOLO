@@ -13,9 +13,26 @@ struct ARCreateAssetFlowView: View {
     @StateObject private var vm = ARCreateViewModel()
     let userId: UUID
     @EnvironmentObject var dashboardState: ARDashboardState
+    @ObservedObject private var remix = RemixStore.shared
 
     var body: some View {
         VStack {
+            if let parent = remix.pendingParentId {
+                HStack(spacing: 8) {
+                    Image(systemName: "wand.and.stars")
+                        .foregroundStyle(AppColors.purplePinkGradient)
+                    Text("Remixing a drop")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button("Clear") { remix.pendingParentId = nil }
+                        .font(.caption.weight(.bold))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.purple.opacity(0.12))
+                .accessibilityLabel("Remix parent \(parent.uuidString)")
+            }
+
             stepIndicator
 
             // Always keep FileStepView in the hierarchy; overlay AR placement on top

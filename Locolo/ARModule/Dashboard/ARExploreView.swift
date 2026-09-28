@@ -17,10 +17,14 @@ struct ARExploreView: View {
     @ObservedObject private var inbox = InboxStore.shared
     @ObservedObject private var activity = ActivityStore.shared
     @ObservedObject private var follows = FollowStore.shared
+    @ObservedObject private var stories = StoryStore.shared
+    @ObservedObject private var events = EventsStore.shared
+    @ObservedObject private var presence = PresenceStore.shared
 
     @State private var selectedAsset: DigitalAsset?
     @State private var commentsAsset: DigitalAsset?
     @State private var featuredPage = 0
+    @State private var showImmersiveFeed = false
 
     var body: some View {
         ZStack {
@@ -41,7 +45,9 @@ struct ARExploreView: View {
                         .padding(.top, 60)
                     } else {
                         VStack(spacing: 0) {
+                            StoryRailView()
                             featuredSection
+                            exploreRailsSection
                             suggestedCreatorsSection
                             feedSection
                         }
@@ -52,7 +58,11 @@ struct ARExploreView: View {
                     async let feed: Void = vm.refresh()
                     async let followsReload: Void = follows.reload()
                     async let activityReload: Void = activity.refresh()
-                    _ = await (feed, followsReload, activityReload)
+                    async let storiesReload: Void = stories.refresh()
+                    async let presenceReload: Void = presence.refreshNearby()
+                    async let eventsReload: Void = events.refresh()
+                    _ = await (feed, followsReload, activityReload, storiesReload, presenceReload, eventsReload)
+                    await presence.heartbeat()
                 }
             }
         }
@@ -72,23 +82,137 @@ struct ARExploreView: View {
             }
         }
         .task { await vm.load() }
+        .task {
+            if !stories.hasLoaded { await stories.refresh() }
+            await presence.heartbeat()
+            await presence.refreshNearby()
+        }
         .task(id: vm.visibleFeed.map(\.id)) {
             await EngagementStore.shared.prime(vm.visibleFeed)
+            await RepostStore.shared.prime(vm.visibleFeed)
+            await ReactionStore.shared.prime(vm.visibleFeed)
         }
         .sheet(item: $selectedAsset) { asset in
             AssetDetailSheet(
                 asset: asset,
                 onOpenCreator: { dashboardState.path.append(.profile(userId: asset.userId)) },
-                onOpenProfile: { openProfile($0) }
+                onOpenProfile: { openProfile($0) },
+                onRemix: {
+                    selectedAsset = nil
+                    dashboardState.path.append(.create)
+                }
             )
         }
         .sheet(item: $commentsAsset) { asset in
             CommentsSheet(asset: asset, onOpenProfile: { openProfile($0) })
         }
+        .fullScreenCover(isPresented: $showImmersiveFeed) {
+            ImmersiveFeedView(
+                assets: vm.feedAssets,
+                creatorFor: { vm.creator(for: $0) },
+                isTrending: { vm.isTrending($0) },
+                onClose: { showImmersiveFeed = false },
+                onOpenCreator: { openProfile($0) },
+                onOpenInAR: {
+                    showImmersiveFeed = false
+                    dashboardState.path.append(.viewer)
+                },
+                onNearEnd: { vm.loadMoreIfNeeded(current: $0) }
+            )
+            .task(id: vm.visibleFeed.map(\.id)) {
+                await EngagementStore.shared.prime(vm.visibleFeed)
+                await ReactionStore.shared.prime(vm.visibleFeed)
+            }
+        }
     }
 
     private func openProfile(_ id: UUID) {
         dashboardState.path.append(.profile(userId: id))
+    }
+
+    // MARK: - Rails (trending near you / drops / events / presence)
+
+    @ViewBuilder
+    private var exploreRailsSection: some View {
+        VStack(spacing: 0) {
+            if !vm.trendingNearYou.isEmpty {
+                assetRail(title: "Trending near you", icon: "flame.fill", assets: vm.trendingNearYou)
+            }
+            if !vm.dropsToday.isEmpty {
+                assetRail(title: "Drops today", icon: "sparkle", assets: vm.dropsToday)
+            }
+            if events.available && !events.upcoming.isEmpty {
+                Button {
+                    dashboardState.path.append(.events)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "calendar")
+                            .foregroundStyle(AppColors.purplePinkGradient)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("AR Events")
+                                .font(.subheadline.bold())
+                                .foregroundColor(.primary)
+                            Text("\(events.upcoming.count) meetup\(events.upcoming.count == 1 ? "" : "s") coming up")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(14)
+                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.adaptive(light: Color.black.opacity(0.04), dark: Color.white.opacity(0.06))))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                }
+                .buttonStyle(.plain)
+            }
+            if presence.available && !presence.nearby.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.3.fill")
+                        .font(.caption)
+                        .foregroundColor(.purple)
+                    Text("\(presence.nearby.count) explorer\(presence.nearby.count == 1 ? "" : "s") nearby")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+            }
+        }
+    }
+
+    private func assetRail(title: String, icon: String, assets: [DigitalAsset]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: icon)
+                .font(.headline.bold())
+                .foregroundColor(.primary)
+                .padding(.horizontal, 16)
+                .padding(.top, 20)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(assets) { asset in
+                        Button { selectedAsset = asset } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                AssetThumbnailView(asset: asset, cornerRadius: 14)
+                                    .frame(width: 112, height: 112)
+                                Text(asset.name ?? "Untitled")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                    .frame(width: 112, alignment: .leading)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
     }
 
     // MARK: - Loading
@@ -194,13 +318,28 @@ struct ARExploreView: View {
 
     private var feedSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ARSectionHeader(
-                title: "Shared Space",
-                subtitle: "AR art placed around the world",
-                icon: "globe.americas.fill"
-            )
+            HStack(alignment: .top, spacing: 12) {
+                ARSectionHeader(
+                    title: "Shared Space",
+                    subtitle: "AR art placed around the world",
+                    icon: "globe.americas.fill"
+                )
+                Spacer(minLength: 0)
+                Button {
+                    ARHaptics.tick()
+                    showImmersiveFeed = true
+                } label: {
+                    Label("Swipe", systemImage: "rectangle.stack.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(AppColors.purplePinkGradient))
+                }
+                .accessibilityLabel("Open immersive For You feed")
+                .padding(.top, 24)
+            }
             .padding(.horizontal, 16)
-            .padding(.top, 24)
 
             feedFilterChips
 
@@ -277,61 +416,63 @@ struct ARFeaturedCard: View {
     let asset: DigitalAsset
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            AssetThumbnailView(asset: asset, cornerRadius: 0)
-                .aspectRatio(contentMode: .fill)
-                .frame(maxWidth: .infinity)
-                .frame(height: 240)
-                .clipped()
+        HoloCard(intensity: asset.isRareFind ? 1.15 : 0.9) {
+            ZStack(alignment: .bottomLeading) {
+                AssetThumbnailView(asset: asset, cornerRadius: 0)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 240)
+                    .clipped()
 
-            LinearGradient(
-                colors: [.clear, Color.black.opacity(0.88)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
+                LinearGradient(
+                    colors: [.clear, Color.black.opacity(0.88)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 5) {
-                    Image(systemName: "bolt.fill")
-                        .font(.caption2)
-                        .foregroundColor(.yellow)
-                    Text("\(asset.hypeCount.compactFormatted) hype")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.white)
-                    if asset.viewCount > 0 {
-                        Text("· \(asset.viewCount.compactFormatted) explorers")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.75))
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(Color.black.opacity(0.45)))
-
-                Text(asset.name ?? "Untitled")
-                    .font(.title3.bold())
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-
-                if let loc = asset.displayLocation {
-                    HStack(spacing: 4) {
-                        Image(systemName: "location.fill")
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "bolt.fill")
                             .font(.caption2)
-                        Text(loc)
-                            .font(.caption)
-                            .lineLimit(1)
+                            .foregroundColor(.yellow)
+                        Text("\(asset.hypeCount.compactFormatted) hype")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.white)
+                        if asset.viewCount > 0 {
+                            Text("· \(asset.viewCount.compactFormatted) explorers")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.75))
+                        }
                     }
-                    .foregroundColor(.white.opacity(0.75))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.black.opacity(0.45)))
+
+                    Text(asset.name ?? "Untitled")
+                        .font(.title3.bold())
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    if let loc = asset.displayLocation {
+                        HStack(spacing: 4) {
+                            Image(systemName: "location.fill")
+                                .font(.caption2)
+                            Text(loc)
+                                .font(.caption)
+                                .lineLimit(1)
+                        }
+                        .foregroundColor(.white.opacity(0.75))
+                    }
                 }
+                .padding(16)
             }
-            .padding(16)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.purple.opacity(0.3), radius: 20, x: 0, y: 8)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-        )
-        .shadow(color: Color.purple.opacity(0.3), radius: 20, x: 0, y: 8)
     }
 }
 

@@ -43,6 +43,7 @@ struct LocoloApp: App {
         NotificationManager.shared.requestAuthorization()
         
         FirebaseApp.configure()// This needs to run after every view model and stuff has initialised
+        LocoloAnalytics.configure()
         
         _createPostVM = StateObject(wrappedValue: CreatePostViewModel(
           loopVM: loop,

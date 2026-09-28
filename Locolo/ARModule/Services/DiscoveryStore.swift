@@ -33,6 +33,7 @@ final class DiscoveryStore: ObservableObject {
         guard found[id] == nil else { return false }
         found[id] = date
         persist()
+        ProgressStore.shared.noteDiscovery(id)
         return true
     }
 

@@ -524,6 +524,7 @@ enum CacheMapper {
             rotQZ: nil,
             rotQW: nil,
             headingAccuracyDeg: nil,
+            ownerId: nil,
             isForSale: isForSale,
             acceptsOffers: acceptsOffers,
             currentValue: currentValue,

@@ -2,9 +2,7 @@
 //  TriggerConfigView.swift
 //  Locolo
 //
-//  Form section where the poster picks how the asset's animation fires:
-//  tap, walking within a chosen distance, saying an exact phrase, or a
-//  preset shake pattern.
+//  Form section where the poster picks how the asset's animation fires.
 //
 
 import SwiftUI
@@ -54,6 +52,44 @@ struct TriggerConfigView: View {
                 }
                 .pickerStyle(.segmented)
                 Text("Reacts when the viewer moves their phone this way.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .gaze:
+            VStack(alignment: .leading, spacing: 6) {
+                Slider(value: $vm.gazeSeconds, in: 0.5...5, step: 0.5)
+                Text("Reacts after looking at it for \(vm.gazeSeconds, specifier: "%.1f") s")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .timeOfDay:
+            VStack(alignment: .leading, spacing: 8) {
+                Stepper("From \(vm.todStartHour):00", value: $vm.todStartHour, in: 0...23)
+                Stepper("Until \(vm.todEndHour):00", value: $vm.todEndHour, in: 0...23)
+                Text("Fires once while the viewer is near and the local clock is in this window.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .longPress:
+            Text("The asset reacts when the viewer presses and holds it — like petting.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+        case .multiTap:
+            VStack(alignment: .leading, spacing: 6) {
+                Stepper("\(vm.multiTapCount) taps", value: $vm.multiTapCount, in: 2...6)
+                Text("Reacts after this many quick taps on the asset.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .walkAround:
+            VStack(alignment: .leading, spacing: 6) {
+                Slider(value: $vm.orbitDegrees, in: 90...360, step: 15)
+                Text("Reacts after walking ~\(Int(vm.orbitDegrees))° around it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

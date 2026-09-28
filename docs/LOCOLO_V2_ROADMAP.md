@@ -3,7 +3,7 @@
 > **Audience:** AI agents and humans planning the next phase.
 > **Companion specs:** `LOCOLO_V2_MARKETPLACE.md` (blockchain/trading/payments/portfolio), `LOCOLO_V2_SOCIAL_AND_UI.md` (social features + Gen-Z design), `LOCOLO_V2_SECURITY.md` (security & compliance).
 > **Builds on:** `LOCOLO_AR_STATUS.md` (what exists today — read it first). V1 = a working AR social app; V2 = make it feel like a real social network and add a real-world-asset marketplace with crypto-secured trading.
-> **Status:** design only. Nothing here is built yet. Created 2026-09-28.
+> **Status (2026-09-28):** **Client ship-ready** (stage 19, uncommitted). **CLAUDE: ACTION REQUIRED** — apply §5.10–§5.28 SQL. Remaining external: partner onramp keys, contract audit, App Store legal, APNs, Firebase SA, Widget Extension target, device QA. Plan: `LOCOLO_V2_COMPLETION_PLAN.md`.
 
 ---
 
@@ -43,9 +43,12 @@ These are called out in detail in the marketplace/security specs; collected here
 Marketplace is gated on decisions above and on security work; build in this order so nothing ships half-secure.
 
 - **Phase A — Marketplace foundation (off-chain first):** wallet linking, a real listings/auction/offer model on top of the existing `offers`/`price_history` tables, **portfolio graphs** (Swift Charts, using data we already have), and the trading UI — all settling **off-chain in the DB ledger** initially. Ships value without the chain risk. (Marketplace spec §Phase A)
-- **Phase B — Fiat payments:** Apple Pay / card via Stripe or the on-ramp partner, escrowed off-chain, payouts to creators. Real money, real KYC thresholds. (Marketplace §Phase B, Security §Payments)
-- **Phase C — On-chain:** embedded wallets, lazy-mint to Base, Seaport listings, USDC settlement, royalties, provenance, chain indexer webhooks reconciling to the DB. (Marketplace §Phase C)
-- **Phase D — Social depth:** ship in parallel throughout (no chain dependency) — stories, remixes, collections, hashtags, leaderboards, Passport gamification. (Social spec)
+  - **DB: ✅ applied** (`2026_v2_marketplace_phase_a.sql`). Mint/coupons/provenance SQL in repo — **CLAUDE: ACTION REQUIRED** apply §5.10 (owner deferred).
+  - **Product UI: 🟡 coded** (list/buy/cancel, provenance, portfolio chart) — uncommitted, build green.
+  - **Mint paywall Swift: 🟡 coded** — uncommitted; prod coupons wait on §5.10.
+- **Phase B — Fiat payments:** 🟡 foundation coded — `payment_intents` / `create_payment_intent` SQL (§5.18) + `PaymentService`; paid mint creates a pending intent. **Needs** `onramp-session` edge fn + partner keys for Apple Pay / card.
+- **Phase C — On-chain:** 🟡 foundation coded — `nft_tokens` / `link_wallet` SQL (§5.19) + `WalletService` (Settings link). **Needs** embedded wallet SDK, Locolo721 + Seaport audit, indexer webhook.
+- **Phase D — Social depth:** 🟢 client complete through Tier 2–3 (remix/react/polls/presence/events/mute/CF + polish). **CLAUDE: ACTION REQUIRED** apply §5.11–§5.17 + §5.20 + §5.22. Plan: `LOCOLO_V2_COMPLETION_PLAN.md`.
 - **Cross-cutting — Security:** each phase has a security gate it must pass (Security spec §Gates).
 
 ## 5. How V2 maps onto today's code

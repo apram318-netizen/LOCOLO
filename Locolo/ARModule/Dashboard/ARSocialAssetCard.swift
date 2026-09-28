@@ -27,14 +27,18 @@ struct ARSocialAssetCard: View {
     @EnvironmentObject var wishlistVM: WishlistViewModel
     @ObservedObject private var engagement = EngagementStore.shared
     @ObservedObject private var follows = FollowStore.shared
+    @ObservedObject private var reposts = RepostStore.shared
 
     @State private var isWishlisted = false
     @State private var burst = false
     @State private var showReport = false
+    @State private var showSaveToBoard = false
 
     private var isHyped: Bool { engagement.isHyped(asset.id) }
     private var hypeCount: Int { engagement.hypeCount(for: asset) }
     private var commentCount: Int { engagement.commentCount(for: asset.id) }
+    private var isReposted: Bool { reposts.isReposted(asset.id) }
+    private var repostCount: Int { reposts.count(for: asset.id) }
     private var isMine: Bool { userVM.currentUser?.id == asset.userId }
 
     /// The viewer places assets around you, so only offer "Open in AR"
@@ -67,6 +71,10 @@ struct ARSocialAssetCard: View {
         .sheet(isPresented: $showReport) {
             ReportSheet(assetId: asset.id, userId: asset.userId,
                         subjectName: asset.name ?? "this creation")
+        }
+        .sheet(isPresented: $showSaveToBoard) {
+            SaveToBoardSheet(asset: asset)
+                .presentationDetents([.medium, .large])
         }
     }
 
@@ -140,6 +148,9 @@ struct ARSocialAssetCard: View {
                 Button { onOpenCreator?() } label: {
                     Label("View creator", systemImage: "person.crop.circle")
                 }
+            }
+            Button { showSaveToBoard = true } label: {
+                Label("Save to board", systemImage: "square.stack.3d.up")
             }
             if !isMine {
                 Divider()
@@ -248,6 +259,27 @@ struct ARSocialAssetCard: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Comments, \(commentCount)")
+            }
+
+            if reposts.available {
+                Button {
+                    ARHaptics.tick()
+                    Task { await reposts.toggle(asset) }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: isReposted ? "arrow.2.squarepath" : "arrow.2.squarepath")
+                            .font(.title3.weight(.semibold))
+                            .foregroundColor(isReposted ? .green : .primary)
+                        if repostCount > 0 {
+                            Text(repostCount.compactFormatted)
+                                .font(.subheadline.weight(.semibold).monospacedDigit())
+                                .foregroundColor(.primary)
+                                .contentTransition(.numericText())
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isReposted ? "Undo re-drop" : "Re-drop")
             }
 
             ShareLink(item: DeepLinkRouter.assetURL(for: asset.id),

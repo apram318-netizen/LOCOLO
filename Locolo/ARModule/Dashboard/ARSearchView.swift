@@ -14,10 +14,12 @@ struct ARSearchView: View {
 
     @StateObject private var vm = ARGalleryViewModel()
     @EnvironmentObject private var dashboardState: ARDashboardState
+    @ObservedObject private var tags = TagStore.shared
 
     @State private var selectedAsset: DigitalAsset?
     @State private var showFilters = false
     @State private var people: [ARCreator] = []
+    @State private var tagResults: [DigitalAsset]?
     @FocusState private var searchFocused: Bool
 
     /// Recent searches persist across sessions as a JSON-encoded array.
@@ -68,6 +70,9 @@ struct ARSearchView: View {
             }
         }
         .task { await vm.loadArtworks() }
+        .task {
+            if !tags.hasLoaded { await tags.refreshTrending() }
+        }
         .task(id: vm.searchQuery) { await searchPeople() }
         .sheet(item: $selectedAsset) { asset in
             AssetDetailSheet(
@@ -100,6 +105,7 @@ struct ARSearchView: View {
                 if !vm.searchQuery.isEmpty {
                     Button {
                         vm.searchQuery = ""
+                        tagResults = nil
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundColor(.secondary)
@@ -143,6 +149,14 @@ struct ARSearchView: View {
                 .padding(.horizontal, 16)
 
                 chipRow(recentSearches, icon: "arrow.counterclockwise")
+            }
+        }
+
+        if tags.available && !tags.trending.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                ARSectionHeader(title: "Trending tags", icon: "number")
+                    .padding(.horizontal, 16)
+                chipRow(tags.trending.map { "#\($0.slug)" }, icon: "number")
             }
         }
 
@@ -286,27 +300,29 @@ struct ARSearchView: View {
             }
 
             HStack {
-                Text("\(vm.filteredArtworks.count) result\(vm.filteredArtworks.count == 1 ? "" : "s")")
+                Text("\(displayedResults.count) result\(displayedResults.count == 1 ? "" : "s")")
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.secondary)
 
                 Spacer()
 
-                Menu {
-                    ForEach(ARGalleryViewModel.SortOption.allCases) { option in
-                        Button {
-                            vm.sortOption = option
-                        } label: {
-                            Label(option.rawValue,
-                                  systemImage: option == vm.sortOption ? "checkmark" : option.icon)
+                if tagResults == nil {
+                    Menu {
+                        ForEach(ARGalleryViewModel.SortOption.allCases) { option in
+                            Button {
+                                vm.sortOption = option
+                            } label: {
+                                Label(option.rawValue,
+                                      systemImage: option == vm.sortOption ? "checkmark" : option.icon)
+                            }
                         }
+                    } label: {
+                        Label(vm.sortOption.rawValue, systemImage: "arrow.up.arrow.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.purple)
                     }
-                } label: {
-                    Label(vm.sortOption.rawValue, systemImage: "arrow.up.arrow.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.purple)
+                    .accessibilityLabel("Sort results")
                 }
-                .accessibilityLabel("Sort results")
 
                 if vm.hasActiveFilters {
                     Button {
@@ -321,7 +337,7 @@ struct ARSearchView: View {
             }
             .padding(.horizontal, 16)
 
-            if vm.filteredArtworks.isEmpty {
+            if displayedResults.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .font(.largeTitle)
@@ -334,7 +350,7 @@ struct ARSearchView: View {
                 .padding(.top, 48)
             } else {
                 LazyVStack(spacing: 16) {
-                    ForEach(vm.filteredArtworks) { art in
+                    ForEach(displayedResults) { art in
                         Button {
                             commitSearch(vm.searchQuery)
                             selectedAsset = art
@@ -346,6 +362,10 @@ struct ARSearchView: View {
                 }
             }
         }
+    }
+
+    private var displayedResults: [DigitalAsset] {
+        tagResults ?? vm.filteredArtworks
     }
 
     // MARK: - Filter sheet
@@ -451,6 +471,15 @@ struct ARSearchView: View {
         recents.insert(trimmed, at: 0)
         recentSearchesData = (try? JSONEncoder().encode(Array(recents.prefix(8)))) ?? Data()
 
+        if trimmed.hasPrefix("#") {
+            let slug = String(trimmed.drop(while: { $0 == "#" }))
+            Task {
+                tagResults = await tags.assets(forTag: slug)
+            }
+            return
+        }
+
+        tagResults = nil
         // Kick off semantic (pgvector) search alongside keyword filtering.
         // Silently no-ops until the embed-query function is deployed. (WS5.3)
         Task { await vm.deepSearch() }

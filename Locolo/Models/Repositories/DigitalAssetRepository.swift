@@ -301,6 +301,7 @@ final class DigitalAssetRepository {
                     rotQZ: updated[i].rotQZ,
                     rotQW: updated[i].rotQW,
                     headingAccuracyDeg: updated[i].headingAccuracyDeg,
+                    ownerId: updated[i].ownerId,
                     isForSale: updated[i].isForSale,
                     acceptsOffers: updated[i].acceptsOffers,
                     currentValue: updated[i].currentValue,

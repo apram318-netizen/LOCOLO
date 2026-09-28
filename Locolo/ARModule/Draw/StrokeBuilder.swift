@@ -18,7 +18,74 @@ struct StrokeGeometry {
     var indices: [UInt32] = []
 }
 
+enum BrushStyle: String, CaseIterable, Identifiable {
+    case tube
+    case ribbon
+    case neon
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .tube: return "Tube"
+        case .ribbon: return "Ribbon"
+        case .neon: return "Neon"
+        }
+    }
+}
+
 enum StrokeBuilder {
+    /// Build geometry for the chosen brush style.
+    static func geometry(centerline: [SIMD3<Float>], radius: Float, style: BrushStyle) -> StrokeGeometry {
+        switch style {
+        case .tube, .neon:
+            // Neon uses a slightly fatter tube; glow comes from the material.
+            let r = style == .neon ? radius * 1.35 : radius
+            return tube(centerline: centerline, radius: r, sides: style == .neon ? 10 : 8)
+        case .ribbon:
+            return ribbon(centerline: centerline, halfWidth: radius * 1.8)
+        }
+    }
+
+    /// Flat ribbon extruded along the centerline (billboard-ish strip).
+    static func ribbon(centerline raw: [SIMD3<Float>], halfWidth: Float) -> StrokeGeometry {
+        let pts = smooth(raw)
+        var geo = StrokeGeometry()
+        guard pts.count >= 2 else { return geo }
+
+        var leftIdx: [Int] = []
+        var rightIdx: [Int] = []
+        for i in 0..<pts.count {
+            let tangent: SIMD3<Float>
+            if i == 0 {
+                tangent = simd_normalize(pts[1] - pts[0])
+            } else if i == pts.count - 1 {
+                tangent = simd_normalize(pts[i] - pts[i - 1])
+            } else {
+                tangent = simd_normalize(pts[i + 1] - pts[i - 1])
+            }
+            // Prefer a horizontal-ish side vector so ribbons read as strokes in space.
+            var side = simd_cross(tangent, SIMD3<Float>(0, 1, 0))
+            if simd_length(side) < 1e-4 {
+                side = simd_cross(tangent, SIMD3<Float>(1, 0, 0))
+            }
+            side = simd_normalize(side) * halfWidth
+            let n = simd_normalize(simd_cross(side, tangent))
+            leftIdx.append(geo.positions.count)
+            geo.positions.append(pts[i] - side)
+            geo.normals.append(n)
+            rightIdx.append(geo.positions.count)
+            geo.positions.append(pts[i] + side)
+            geo.normals.append(n)
+        }
+        for i in 0..<(pts.count - 1) {
+            let l0 = UInt32(leftIdx[i]), r0 = UInt32(rightIdx[i])
+            let l1 = UInt32(leftIdx[i + 1]), r1 = UInt32(rightIdx[i + 1])
+            geo.indices.append(contentsOf: [l0, r0, l1, r0, r1, l1])
+        }
+        return geo
+    }
+
     /// Resample + lightly smooth a raw point list to uniform spacing so the
     /// tube doesn't kink where the hand jittered.
     static func smooth(_ points: [SIMD3<Float>], minSpacing: Float = 0.005) -> [SIMD3<Float>] {

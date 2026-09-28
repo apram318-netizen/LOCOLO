@@ -132,6 +132,9 @@ final class EngagementStore: ObservableObject {
 
         if let state = await AssetEngagementRepository.shared.toggleHype(userId: me, assetId: id) {
             apply(hyped: state.hyped, count: state.hype_count, for: id)
+            if state.hyped && !wasHyped {
+                ProgressStore.shared.noteQuest(kind: "hype")
+            }
             return state.hyped
         }
         apply(hyped: wasHyped, count: oldCount, for: id)

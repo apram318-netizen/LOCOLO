@@ -28,27 +28,78 @@ final class KeyDirectory {
         let key_updated_at: String
     }
 
-    /// Publish (or refresh) this user's public key. Idempotent — safe to call
-    /// on every launch; only writes if the stored key differs.
+    private struct SigningKeyRow: Decodable {
+        let user_id: UUID
+        let ed25519_public_key: String?
+    }
+
+    private struct SigningKeyUpsert: Encodable {
+        let ed25519_public_key: String
+        let signing_key_updated_at: String
+    }
+
+    private var signingCache: [UUID: String] = [:]
+
+    /// Publish (or refresh) this user's chat + signing public keys. Idempotent.
     func publishMyKey(userId: UUID) async {
         guard let mine = CryptoService.shared.myPublicKeyBase64 else {
             print("KeyDirectory.publishMyKey skipped: Keychain unavailable")
             return
         }
-        if let existing = await publicKey(for: userId), existing == mine { return }
+        if await publicKey(for: userId) != mine {
+            do {
+                try await client
+                    .from("users")
+                    .update(KeyUpsert(
+                        x25519_public_key: mine,
+                        key_updated_at: ISO8601DateFormatter().string(from: Date())
+                    ), returning: .minimal)
+                    .eq("user_id", value: userId)
+                    .execute()
+                cache[userId] = mine
+            } catch {
+                print("KeyDirectory.publishMyKey failed:", error.localizedDescription)
+            }
+        }
+        await publishSigningKey(userId: userId)
+    }
 
+    /// Publish the Ed25519 signing key used for asset-authenticity signatures.
+    func publishSigningKey(userId: UUID) async {
+        guard let mine = CryptoService.shared.mySigningPublicKeyBase64 else { return }
+        if await signingKey(for: userId) == mine { return }
         do {
             try await client
                 .from("users")
-                .update(KeyUpsert(
-                    x25519_public_key: mine,
-                    key_updated_at: ISO8601DateFormatter().string(from: Date())
-                ), returning: .minimal)   // users.email isn't selectable
+                .update(SigningKeyUpsert(
+                    ed25519_public_key: mine,
+                    signing_key_updated_at: ISO8601DateFormatter().string(from: Date())
+                ), returning: .minimal)
                 .eq("user_id", value: userId)
                 .execute()
-            cache[userId] = mine
+            signingCache[userId] = mine
         } catch {
-            print("KeyDirectory.publishMyKey failed:", error.localizedDescription)
+            print("KeyDirectory.publishSigningKey failed:", error.localizedDescription)
+        }
+    }
+
+    /// Fetch (and cache) a user's Ed25519 signing public key, for verifying
+    /// their asset mint signatures.
+    func signingKey(for userId: UUID) async -> String? {
+        if let cached = signingCache[userId] { return cached }
+        do {
+            let rows: [SigningKeyRow] = try await client
+                .from("users")
+                .select("user_id, ed25519_public_key")
+                .eq("user_id", value: userId)
+                .limit(1)
+                .execute()
+                .value
+            let key = rows.first?.ed25519_public_key
+            if let key { signingCache[userId] = key }
+            return key
+        } catch {
+            return nil
         }
     }
 

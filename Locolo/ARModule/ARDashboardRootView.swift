@@ -148,6 +148,14 @@ struct ARDashboardRootView: View {
         case .wishlist:
             WishlistView()
                 .navigationBarTitleDisplayMode(.inline)
+        case .boards:
+            BoardsListView()
+        case .board(let boardId):
+            BoardDetailView(boardId: boardId)
+        case .leaderboard:
+            LeaderboardView()
+        case .events:
+            EventsListView()
         case .profile(let userId):
             CreatorProfileView(userId: userId)
         case .followList(let userId, let followers):

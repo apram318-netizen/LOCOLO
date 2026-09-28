@@ -29,11 +29,16 @@ struct ARSettingsView: View {
     @State private var isWorking = false
     @State private var errorMessage: String?
 
+    @ObservedObject private var wallets = WalletService.shared
+    @State private var walletAddressDraft = ""
+    @State private var walletBanner: String?
+
     private let usersRepo = UsersRepository()
 
     var body: some View {
         List {
             accountSection
+            walletSection
             notificationsSection
             safetySection
             privacySection
@@ -107,6 +112,52 @@ struct ARSettingsView: View {
         }
     }
 
+    private var walletSection: some View {
+        Section {
+            if !wallets.available && wallets.hasLoaded {
+                Text("On-chain wallets unlock after Phase C SQL (§5.19).")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else if let primary = wallets.primary {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Primary wallet", systemImage: "wallet.pass")
+                    Text(primary.address)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                    Text("\(primary.chain) · \(primary.provider ?? "linked")")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                TextField("0x… address", text: $walletAddressDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.system(.body, design: .monospaced))
+                Button("Link wallet") {
+                    Task {
+                        do {
+                            try await wallets.link(address: walletAddressDraft)
+                            walletBanner = "Wallet linked"
+                            walletAddressDraft = ""
+                            ARHaptics.success()
+                        } catch {
+                            walletBanner = error.localizedDescription
+                        }
+                    }
+                }
+                .disabled(walletAddressDraft.count < 42)
+            }
+            if let walletBanner {
+                Text(walletBanner).font(.caption).foregroundColor(.secondary)
+            }
+        } header: {
+            Text("Wallet (Phase C)")
+        } footer: {
+            Text("Locolo stores your address only — never keys. Embedded passkey wallets (Coinbase Smart Wallet / Privy) plug in here after §5.19.")
+        }
+        .task { if !wallets.hasLoaded { await wallets.refresh() } }
+    }
+
     private var notificationsSection: some View {
         Section {
             if notificationStatus == .denied {
@@ -138,6 +189,11 @@ struct ARSettingsView: View {
             prefToggle("New from people you follow", icon: "sparkles", isOn: $notificationPrefs.prefs.newPosts)
             prefToggle("Discoveries & milestones", icon: "trophy", isOn: $notificationPrefs.prefs.milestones)
             prefToggle("AR art nearby", icon: "location.viewfinder", isOn: $notificationPrefs.prefs.nearby)
+            prefToggle("Reposts & remixes", icon: "arrow.2.squarepath", isOn: $notificationPrefs.prefs.reposts)
+            prefToggle("Reactions", icon: "face.smiling", isOn: $notificationPrefs.prefs.reactions)
+            prefToggle("Quests & levels", icon: "flag.checkered", isOn: $notificationPrefs.prefs.quests)
+            prefToggle("Sales", icon: "dollarsign.circle", isOn: $notificationPrefs.prefs.sales)
+            prefToggle("AR events", icon: "calendar", isOn: $notificationPrefs.prefs.events)
         } header: {
             Text("Notifications")
         } footer: {
@@ -183,10 +239,22 @@ struct ARSettingsView: View {
                       systemImage: "eye.slash")
                     .foregroundColor(.secondary)
             }
+            if SafetyExtrasStore.shared.available {
+                Toggle(isOn: Binding(
+                    get: { PresenceStore.shared.sharingEnabled },
+                    set: { PresenceStore.shared.setSharing($0) }
+                )) {
+                    Label("Share live presence", systemImage: "person.wave.2")
+                }
+                .tint(.purple)
+                Text("Muted: \(SafetyExtrasStore.shared.muted.count) · Close friends: \(SafetyExtrasStore.shared.closeFriends.count)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         } header: {
             Text("Blocked creators")
         } footer: {
-            Text("Blocked creators' assets disappear from your feeds, map, search, and AR view.")
+            Text("Blocked creators' assets disappear from your feeds, map, search, and AR view. Mute hides quietly; close friends can unlock future private story circles.")
         }
     }
 

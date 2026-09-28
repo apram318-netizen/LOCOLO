@@ -73,6 +73,13 @@ struct ARDrawScreen: View {
 
     private var controls: some View {
         VStack(spacing: 12) {
+            Picker("Brush", selection: $vm.brushStyle) {
+                ForEach(BrushStyle.allCases) { style in
+                    Text(style.label).tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+
             // Colour palette
             HStack(spacing: 12) {
                 ForEach(palette, id: \.0) { name, color in

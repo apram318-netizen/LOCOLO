@@ -54,6 +54,9 @@ struct DigitalAsset: Identifiable, Codable {
 
 
 
+    /// Current owner (nil on legacy rows — treat as `userId`).
+    let ownerId: UUID?
+
     ///Offers Now
     let isForSale: Bool?
     let acceptsOffers: Bool?
@@ -99,6 +102,7 @@ struct DigitalAsset: Identifiable, Codable {
         case rotQZ = "rot_qz"
         case rotQW = "rot_qw"
         case headingAccuracyDeg = "heading_accuracy_deg"
+        case ownerId = "owner_id"
         case isForSale = "is_for_sale"
         case acceptsOffers = "accepts_offers"
         case currentValue = "current_value"

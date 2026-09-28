@@ -36,6 +36,11 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     @Published var savedAssetId: UUID?
     @Published var savedAssetName: String = ""
 
+    // Authenticity: SHA-256 of the uploaded model bytes (set at upload time).
+    var contentHash: String?
+    /// A settled mint order (paid or waived by coupon) that authorizes this mint.
+    @Published var mintOrderId: UUID?
+
     /// Deep link into this asset (registered scheme: locolo://). (WS7.4)
     var savedAssetShareURL: URL? {
         savedAssetId.flatMap { URL(string: "locolo://asset/\($0.uuidString.lowercased())") }
@@ -69,8 +74,15 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     // MARK: Details
     @Published var name: String = ""
     @Published var descriptionText: String = ""
+    /// Comma/# separated tags entered on the details step (Phase D hashtags).
+    @Published var tagsText: String = ""
     @Published var visibility: String = "public"
     @Published var alsoMakePost: Bool = false
+    /// Optional poll attached after mint (Phase D §5.20).
+    @Published var pollQuestion: String = ""
+    @Published var pollOptionA: String = ""
+    @Published var pollOptionB: String = ""
+    @Published var pollOptionC: String = ""
 
     // MARK: Exact address + altitude (captured at placement time)
     @Published var address: String = ""
@@ -89,6 +101,11 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     @Published var triggerDistance: Double = 10
     @Published var triggerPhrase: String = ""
     @Published var shakePattern: ShakePattern = .single
+    @Published var gazeSeconds: Double = 1.5
+    @Published var todStartHour: Int = 17
+    @Published var todEndHour: Int = 21
+    @Published var multiTapCount: Int = 3
+    @Published var orbitDegrees: Double = 270
 
     private let client = SupabaseManager.shared.client
     private let storage = ObjStorageManager.shared
@@ -202,7 +219,7 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
                 return name.isEmpty ? "Animation \(index + 1)" : name
             }
         } catch {
-            print(" Failed to enumerate animations:", error.localizedDescription)
+            LocoloLog.ar.error("enumerate animations failed: \(error.localizedDescription, privacy: .public)")
             previewEntity = nil
             availableAnimations = []
         }
@@ -233,11 +250,13 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
 
         do {
             let data = try secureFileData(from: url)
+            // Content hash for authenticity: proves the exact bytes that were minted.
+            contentHash = CryptoService.sha256Hex(data)
             let contentType = (fileType == "usdz") ? "model/usdz" : "model/fbx"
             let fileName = UUID().uuidString + "-" + url.lastPathComponent
             let path = "DigitalArt/\(fileName)"
 
-            print(" Uploading \(fileName) to bucket: \(bucket)")
+            LocoloLog.debug(LocoloLog.mint, "uploading \(fileName) → \(bucket)")
             let publicURL = try await storage.uploadFile(
                 bucket: bucket,
                 path: path,
@@ -245,10 +264,10 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
                 contentType: contentType
             )
             uploadedFileURL = URL(string: publicURL)
-            print(" Uploaded file available at: \(uploadedFileURL?.absoluteString ?? "nil")")
+            LocoloLog.debug(LocoloLog.mint, "upload ok")
         } catch {
             self.error = "Upload failed: \(error.localizedDescription)"
-            print(" Upload failed:", error)
+            LocoloLog.mint.error("upload failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -349,17 +368,17 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
     ///
     /// - Parameter userId: The UUID of the logged-in user creating the asset
     func saveAsset(userId: UUID) async {
-        print(" Starting digital asset upload (saveAsset)")
+        LocoloLog.debug(LocoloLog.mint, "saveAsset start")
         savedAssetId = nil   // clear any previous save's share state
 
         guard let uploaded = uploadedFileURL else {
             error = "File has not been uploaded."
-            print("  No uploaded file URL found.")
+            LocoloLog.mint.error("saveAsset: missing uploaded file URL")
             return
         }
         guard let worldRotation = capturedWorldRotation else {
             error = "AR placement not confirmed."
-            print("  No AR placement available.")
+            LocoloLog.mint.error("saveAsset: missing AR placement")
             return
         }
 
@@ -371,7 +390,7 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
         let coord = (location ?? locationManager.location)?.coordinate
         guard let lat = coord?.latitude, let lon = coord?.longitude else {
             error = "No GPS location available."
-            print("  Missing GPS coordinates.")
+            LocoloLog.mint.error("saveAsset: missing GPS")
             return
         }
 
@@ -384,19 +403,17 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             return
         }
 
-        print(" Location: lat=\(lat), lon=\(lon)")
-        print("   Rotation (deg):", rotationDeg, "Scale:", scale, "Heading acc:", headingAccuracy ?? -1)
-        print("   User ID:", userId)
+        LocoloLog.debug(LocoloLog.ar, "saveAsset: coords omitted; headingAcc=\(headingAccuracy ?? -1)")
 
         isBusy = true
         defer {
             isBusy = false
-            print(" Digital asset upload completed\n──────────────────────────────\n")
+            LocoloLog.debug(LocoloLog.mint, "saveAsset completed")
         }
 
         do {
             // 1. Create location row with exact address + altitude
-            print(" Inserting location into 'locations' table...")
+            LocoloLog.debug(LocoloLog.mint, "inserting location row")
             let newLocation = NewLocation(
                 name: name.isEmpty ? "AR Placement" : name,
                 geom: "SRID=4326;POINT(\(lon) \(lat))",
@@ -415,13 +432,25 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
                 .value
 
             let locationId = locRow.location_id
-            print(" Location row inserted → id:", locationId)
+            LocoloLog.debug(LocoloLog.mint, "location inserted")
 
             let mediaURL = try await uploadMediaAttachmentIfNeeded()
 
+            // Authenticity: generate the id up front so the creator can sign the
+            // mint. A DB trigger writes the genesis provenance record from these.
+            let newAssetId = UUID()
+            let signingKey = CryptoService.shared.mySigningPublicKeyBase64
+            var creatorSignature: String?
+            if let ch = contentHash, signingKey != nil {
+                let mintMessage = "locolo-mint-v1|\(newAssetId.uuidString.lowercased())|\(userId.uuidString.lowercased())|\(ch)"
+                creatorSignature = CryptoService.shared.sign(mintMessage)
+            }
+
             // 2. Insert digital asset
             let newAsset = NewAsset(
+                asset_id: newAssetId,
                 user_id: userId,
+                owner_id: userId,
                 name: name.isEmpty ? "Untitled Asset" : name,
                 description: descriptionText,
                 file_url: uploaded.absoluteString,
@@ -448,10 +477,13 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
                 rot_qy: Double(worldRotation.imag.y),
                 rot_qz: Double(worldRotation.imag.z),
                 rot_qw: Double(worldRotation.real),
-                heading_accuracy_deg: headingAccuracy
+                heading_accuracy_deg: headingAccuracy,
+                content_hash: contentHash,
+                creator_signature: creatorSignature,
+                creator_signing_key: signingKey
             )
 
-            print(" Uploading asset to 'digital_assets' table...")
+            LocoloLog.debug(LocoloLog.mint, "inserting digital_assets row")
             struct AssetInsertResponse: Decodable { let asset_id: UUID }
             let inserted: AssetInsertResponse = try await client
                 .from("digital_assets")
@@ -460,22 +492,53 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
                 .single()
                 .execute()
                 .value
-            print("  Digital asset inserted successfully! id:", inserted.asset_id)
+            LocoloLog.mint.info("digital asset inserted")
+
+            // Bind the waived/paid mint order to this asset (marks it consumed).
+            if let orderId = mintOrderId {
+                do {
+                    try await MintingService.shared.attach(orderId: orderId, assetId: inserted.asset_id)
+                } catch {
+                    LocoloLog.mint.error("attach_mint_order failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            // Attach hashtags (no-op / silent if tags migration isn't applied).
+            let tagList = TagStore.normalizeList(from: tagsText)
+            if !tagList.isEmpty {
+                await TagStore.shared.setTags(tagList, on: inserted.asset_id)
+            }
+            // Remix parent + collab credits (separate tables — skip if schema missing).
+            if let parent = RemixStore.shared.pendingParentId {
+                await RemixStore.shared.attach(child: inserted.asset_id, parent: parent)
+                RemixStore.shared.pendingParentId = nil
+            }
+            await CollabStore.shared.consumePending(for: inserted.asset_id)
+            let opts = [pollOptionA, pollOptionB, pollOptionC]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let q = pollQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !q.isEmpty, opts.count >= 2 {
+                try? await PollStore.shared.create(assetId: inserted.asset_id, question: q, options: opts)
+            }
+            ProgressStore.shared.noteCreate()
+            // Publish the signing key so others can verify this mint later.
+            await KeyDirectory.shared.publishSigningKey(userId: userId)
 
             await MainActor.run {
                 savedAssetId = inserted.asset_id
                 savedAssetName = name.isEmpty ? "Untitled Asset" : name
                 isAssetSaved = true
                 showSuccessAlert = true
+                mintOrderId = nil
             }
 
             // 3. Optional post creation (future feature)
             if alsoMakePost {
-                print(" (Skipped) Post creation flow — coming soon.")
+                LocoloLog.debug(LocoloLog.mint, "post-creation social hooks skipped")
             }
 
             // Reset state
-            print(" Resetting form state for next asset...")
+            LocoloLog.debug(LocoloLog.mint, "resetting create form")
             step = .file
             localFileURL = nil
             uploadedFileURL = nil
@@ -487,6 +550,11 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             capturedWorldScale = nil
             name = ""
             descriptionText = ""
+            tagsText = ""
+            pollQuestion = ""
+            pollOptionA = ""
+            pollOptionB = ""
+            pollOptionC = ""
             visibility = "public"
             alsoMakePost = false
             address = ""
@@ -503,13 +571,7 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             shakePattern = .single
 
         } catch {
-            print("  Failed during digital asset upload.")
-            print("   ↳ Error:", error.localizedDescription)
-            if let nsError = error as NSError? {
-                print("   • Domain:", nsError.domain)
-                print("   • Code:", nsError.code)
-                print("   • Info:", nsError.userInfo)
-            }
+            LocoloLog.mint.error("saveAsset failed: \(error.localizedDescription, privacy: .public)")
             self.error = "Save failed: \(error.localizedDescription)"
         }
     }
@@ -528,6 +590,16 @@ final class ARCreateViewModel: NSObject, ObservableObject, CLLocationManagerDele
             return TriggerConfig(phrase: triggerPhrase.trimmingCharacters(in: .whitespacesAndNewlines))
         case .shake:
             return TriggerConfig(shakePattern: shakePattern)
+        case .gaze:
+            return TriggerConfig(gazeSeconds: gazeSeconds)
+        case .timeOfDay:
+            return TriggerConfig(startHour: todStartHour, endHour: todEndHour)
+        case .longPress:
+            return TriggerConfig()
+        case .multiTap:
+            return TriggerConfig(tapCount: multiTapCount)
+        case .walkAround:
+            return TriggerConfig(orbitDegrees: orbitDegrees)
         }
     }
 
@@ -588,7 +660,9 @@ struct NewLocation: Encodable {
 // MARK: STRUCT: NewAsset
 /// - Description: a comparatively smaller struct for inserting a new digital asset into Supabase.
 struct NewAsset: Encodable {
+    let asset_id: UUID
     let user_id: UUID
+    let owner_id: UUID
     let name: String?
     let description: String?
     let file_url: String
@@ -610,4 +684,8 @@ struct NewAsset: Encodable {
     let rot_qz: Double?
     let rot_qw: Double?
     let heading_accuracy_deg: Double?
+    // Authenticity (provenance ledger)
+    let content_hash: String?
+    let creator_signature: String?
+    let creator_signing_key: String?
 }

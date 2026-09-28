@@ -131,6 +131,26 @@ struct CreatorProfileView: View {
 
     private var safetyMenu: some View {
         Menu {
+            if SafetyExtrasStore.shared.available {
+                Button {
+                    Task { await SafetyExtrasStore.shared.toggleCloseFriend(userId) }
+                } label: {
+                    Label(
+                        SafetyExtrasStore.shared.isCloseFriend(userId)
+                            ? "Remove close friend" : "Add close friend",
+                        systemImage: "star.circle"
+                    )
+                }
+                Button {
+                    Task { await SafetyExtrasStore.shared.toggleMute(userId) }
+                } label: {
+                    Label(
+                        SafetyExtrasStore.shared.isMuted(userId) ? "Unmute" : "Mute",
+                        systemImage: "bell.slash"
+                    )
+                }
+                Divider()
+            }
             Button {
                 showReport = true
             } label: {

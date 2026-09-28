@@ -20,11 +20,29 @@ enum SocialSession {
     static func start(me: UUID) async {
         EngagementStore.shared.configure(me: me)
         ActivityStore.shared.configure(me: me)
+        StoryStore.shared.configure(me: me)
+        BoardsStore.shared.configure(me: me)
+        ProgressStore.shared.configure(me: me)
+        RepostStore.shared.configure(me: me)
+        WalletService.shared.configure(me: me)
+        ReactionStore.shared.configure(me: me)
+        RemixStore.shared.reset()
+        PollStore.shared.configure(me: me)
+        PresenceStore.shared.configure(me: me)
+        EventsStore.shared.configure(me: me)
+        CollabStore.shared.reset()
 
         async let prefs: Void = NotificationPreferences.shared.load(me: me)
         async let push: Void = PushRegistry.shared.start(me: me)
         async let follows: Void = FollowStore.shared.configure(me: me)
         async let activity: Void = ActivityStore.shared.refresh()
+        async let stories: Void = StoryStore.shared.refresh()
+        async let boards: Void = BoardsStore.shared.refresh()
+        async let tags: Void = TagStore.shared.refreshTrending()
+        async let progress: Void = ProgressStore.shared.refresh()
+        async let wallets: Void = WalletService.shared.refresh()
+        async let safetyExtras: Void = SafetyExtrasStore.shared.configure(me: me)
+        async let events: Void = EventsStore.shared.refresh()
 
         // The Firestore listener needs a Firebase session; ContentView signs
         // in concurrently, so give it a moment instead of racing it.
@@ -33,10 +51,11 @@ enum SocialSession {
         }
         InboxStore.shared.start(userId: me.uuidString)
 
-        _ = await (prefs, push, follows, activity)
+        _ = await (prefs, push, follows, activity, stories, boards, tags, progress, wallets, safetyExtras, events)
         ProximityNotifier.shared.start(me: me)
         BadgeSync.shared.start()
         startBackgroundRefresh()
+        Task { await PresenceStore.shared.heartbeat() }
     }
 
     static func end() {
@@ -47,6 +66,19 @@ enum SocialSession {
         EngagementStore.shared.reset()
         FollowStore.shared.reset()
         ActivityStore.shared.reset()
+        StoryStore.shared.reset()
+        BoardsStore.shared.reset()
+        TagStore.shared.reset()
+        ProgressStore.shared.reset()
+        RepostStore.shared.reset()
+        WalletService.shared.reset()
+        ReactionStore.shared.reset()
+        RemixStore.shared.reset()
+        PollStore.shared.reset()
+        PresenceStore.shared.reset()
+        EventsStore.shared.reset()
+        SafetyExtrasStore.shared.reset()
+        CollabStore.shared.reset()
         InboxStore.shared.resetForSignOut()
         CreatorCache.shared.reset()
     }

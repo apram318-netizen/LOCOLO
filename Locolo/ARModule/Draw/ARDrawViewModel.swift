@@ -25,6 +25,7 @@ final class ARDrawViewModel: ObservableObject {
     /// Stroke appearance.
     @Published var strokeRadius: Float = 0.01
     @Published var strokeColor: UIColor = UIColor(red: 0.55, green: 0.36, blue: 0.96, alpha: 1) // Locolo violet
+    @Published var brushStyle: BrushStyle = .tube
 
     /// Upper bound on total centerline points so the exported USDZ stays small.
     static let maxTotalPoints = 6000
@@ -40,6 +41,23 @@ final class ARDrawViewModel: ObservableObject {
     private var committedEntities: [ModelEntity] = []
     private var currentPoints: [SIMD3<Float>] = []
     private var previewEntity: ModelEntity?
+
+    private func material(for color: UIColor, style: BrushStyle) -> RealityKit.Material {
+        switch style {
+        case .neon:
+            // Bright unlit + slight emissive feel via saturated colour.
+            var c = color
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            color.getRed(&r, green: &g, blue: &b, alpha: &a)
+            c = UIColor(red: min(1, r * 1.25 + 0.1),
+                        green: min(1, g * 1.25 + 0.1),
+                        blue: min(1, b * 1.25 + 0.1),
+                        alpha: 1)
+            return UnlitMaterial(color: c)
+        case .tube, .ribbon:
+            return UnlitMaterial(color: color)
+        }
+    }
 
     var canUndo: Bool { !committedEntities.isEmpty }
     var hasContent: Bool { !committedGeometries.isEmpty }
@@ -80,11 +98,12 @@ final class ARDrawViewModel: ObservableObject {
         defer { currentPoints.removeAll(); clearPreview() }
         guard currentPoints.count >= 2 else { return }
 
-        let geo = StrokeBuilder.tube(centerline: currentPoints, radius: strokeRadius)
+        let style = brushStyle
+        let geo = StrokeBuilder.geometry(centerline: currentPoints, radius: strokeRadius, style: style)
         guard let mesh = StrokeBuilder.meshResource(from: geo) else { return }
 
         ensureAnchor()
-        let entity = ModelEntity(mesh: mesh, materials: [UnlitMaterial(color: strokeColor)])
+        let entity = ModelEntity(mesh: mesh, materials: [material(for: strokeColor, style: style)])
         anchor?.addChild(entity)
 
         committedGeometries.append(geo)
@@ -124,13 +143,16 @@ final class ARDrawViewModel: ObservableObject {
 
     private func updatePreview() {
         guard currentPoints.count >= 2 else { return }
-        let geo = StrokeBuilder.tube(centerline: currentPoints, radius: strokeRadius)
+        let style = brushStyle
+        let geo = StrokeBuilder.geometry(centerline: currentPoints, radius: strokeRadius, style: style)
         guard let mesh = StrokeBuilder.meshResource(from: geo) else { return }
         ensureAnchor()
+        let mats = [material(for: strokeColor, style: style)]
         if let previewEntity {
             previewEntity.model?.mesh = mesh
+            previewEntity.model?.materials = mats
         } else {
-            let e = ModelEntity(mesh: mesh, materials: [UnlitMaterial(color: strokeColor)])
+            let e = ModelEntity(mesh: mesh, materials: mats)
             anchor?.addChild(e)
             previewEntity = e
         }

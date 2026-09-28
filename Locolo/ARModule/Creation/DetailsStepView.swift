@@ -8,6 +8,8 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import RealityKit
+import UIKit
 
 struct DetailsStepView: View {
     @ObservedObject var vm: ARCreateViewModel
@@ -17,12 +19,48 @@ struct DetailsStepView: View {
     @State private var showMediaPicker = false
     @State private var showShareSheet = false
 
+    // Mint paywall
+    @State private var couponText = ""
+    @State private var quote: MintingService.FeeQuote?
+    @State private var couponValid = false
+    @State private var couponMessage: String?
+    @State private var isPreviewing = false
+    @State private var isMinting = false
+
+    private var mintButtonTitle: String {
+        if let q = quote, q.total <= 0 { return "Mint for free" }
+        if let q = quote { return "Mint · $\(String(format: "%.2f", q.total))" }
+        return "Mint"
+    }
+
     var body: some View {
         Form {
             Section("Info") {
                 TextField("Name", text: $vm.name)
                 TextField("Description", text: $vm.descriptionText, axis: .vertical)
                     .lineLimit(3...6)
+                TextField("Tags (e.g. streetart, sculpture)", text: $vm.tagsText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+
+            Section {
+                CollabPickerRow()
+            } header: {
+                Text("Featuring")
+            } footer: {
+                Text("Credit collab partners on this drop. Needs §5.20 SQL.")
+            }
+
+            Section {
+                TextField("Poll question (optional)", text: $vm.pollQuestion)
+                TextField("Option A", text: $vm.pollOptionA)
+                TextField("Option B", text: $vm.pollOptionB)
+                TextField("Option C (optional)", text: $vm.pollOptionC)
+            } header: {
+                Text("Poll")
+            } footer: {
+                Text("Leave blank to skip. Needs §5.20 polls tables.")
             }
 
             Section("Location") {
@@ -46,6 +84,26 @@ struct DetailsStepView: View {
             if vm.selectedAnimationIndex != nil || vm.localMediaURL != nil {
                 Section("Interaction") {
                     TriggerConfigView(vm: vm)
+                    if vm.previewEntity != nil {
+                        AnimationPreviewView(vm: vm)
+                            .frame(height: 180)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        Button {
+                            ARHaptics.tick()
+                            // Re-play selected animation as a live trigger preview.
+                            if let entity = vm.previewEntity,
+                               let idx = vm.selectedAnimationIndex,
+                               entity.availableAnimations.indices.contains(idx) {
+                                entity.playAnimation(entity.availableAnimations[idx].repeat(count: 1))
+                            }
+                            if let url = vm.localMediaURL {
+                                // Preview sidecar audio via system player when present.
+                                TriggerPreviewAudio.shared.play(url: url)
+                            }
+                        } label: {
+                            Label("Preview trigger", systemImage: "play.circle.fill")
+                        }
+                    }
                 }
             }
 
@@ -99,19 +157,50 @@ struct DetailsStepView: View {
                 }
             }
 
+            // Mint paywall: fee + coupon → creates a mint order, then mints.
             Section {
-                Button {
-                    saveAction()
-                } label: {
-                    HStack {
-                        if vm.isBusy { ProgressView().padding(.trailing, 6) }
-                        Text("Upload")
-                            .frame(maxWidth: .infinity, alignment: .center)
+                HStack {
+                    Text("Mint fee")
+                    Spacer()
+                    if let q = quote, q.discount > 0 {
+                        Text("$\(q.fee, specifier: "%.2f")").strikethrough().foregroundStyle(.secondary)
+                        Text(q.total <= 0 ? "FREE" : "$\(q.total, specifier: "%.2f")")
+                            .fontWeight(.bold)
+                            .foregroundStyle(q.total <= 0 ? Color.green : Color.primary)
+                    } else {
+                        Text("$\(quote?.total ?? 2.99, specifier: "%.2f")").fontWeight(.semibold)
                     }
                 }
-                .disabled(vm.isBusy || vm.uploadedFileURL == nil || vm.transform == nil)
+
+                HStack {
+                    TextField("Coupon code", text: $couponText)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                    Button("Apply") { Task { await applyCoupon() } }
+                        .disabled(couponText.trimmingCharacters(in: .whitespaces).isEmpty || isPreviewing)
+                }
+                if let couponMessage {
+                    Text(couponMessage)
+                        .font(.caption)
+                        .foregroundStyle(couponValid ? .green : .red)
+                }
+
+                Button {
+                    Task { await mint() }
+                } label: {
+                    HStack {
+                        if vm.isBusy || isMinting { ProgressView().padding(.trailing, 6) }
+                        Text(mintButtonTitle).frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
+                .disabled(vm.isBusy || isMinting || vm.uploadedFileURL == nil || vm.transform == nil)
+            } header: {
+                Text("Mint")
+            } footer: {
+                Text("Minting registers your creation on Locolo's authenticity ledger — signed by you and tamper-evident. Free with a coupon; paid mint opens a Phase B payment intent (Apple Pay / on-ramp once §5.18 + onramp-session are live).")
             }
         }
+        .task { if quote == nil { quote = await MintingService.shared.preview(coupon: nil) } }
         .sheet(isPresented: $showAddressSheet) {
             AddressConfirmationView(vm: vm)
         }
@@ -154,6 +243,76 @@ struct DetailsStepView: View {
     }
 }
 
+extension DetailsStepView {
+    private func applyCoupon() async {
+        isPreviewing = true; defer { isPreviewing = false }
+        let code = couponText.trimmingCharacters(in: .whitespaces)
+        let q = await MintingService.shared.preview(coupon: code)
+        quote = q
+        couponValid = q?.valid ?? false
+        if let q {
+            couponMessage = q.valid
+                ? (q.total <= 0 ? "Coupon applied — mint is free 🎉" : "Coupon applied")
+                : (q.reason ?? "Invalid code")
+        } else {
+            couponMessage = "Couldn't check that code"
+        }
+    }
+
+    private func mint() async {
+        isMinting = true; defer { isMinting = false }
+        let code = couponText.trimmingCharacters(in: .whitespaces)
+        do {
+            let order = try await MintingService.shared.createOrder(coupon: code.isEmpty ? nil : code)
+            if order.status == "waived" || order.total <= 0 {
+                vm.mintOrderId = order.order_id
+                ARHaptics.success()
+                saveAction()   // proceeds to upload + sign + insert (provenance auto)
+            } else {
+                // Phase B: create intent via RPC, then open onramp-session checkout.
+                do {
+                    let intent = try await PaymentService.shared.createIntent(
+                        amount: order.total,
+                        purpose: "mint_fee",
+                        mintOrderId: order.order_id
+                    )
+                    let session = await PaymentService.shared.startCheckout(
+                        amount: order.total,
+                        purpose: "mint_fee",
+                        mintOrderId: order.order_id
+                    )
+                    couponValid = false
+                    if let url = session.checkoutURL {
+                        await UIApplication.shared.open(url)
+                        couponMessage = "Checkout opened for $\(String(format: "%.2f", intent.amount)). You'll mint when payment succeeds."
+                    } else {
+                        couponMessage = "Intent \(intent.providerRef.prefix(12))… · \(session.message) Or apply a coupon to mint free now."
+                    }
+                } catch {
+                    // RPC missing — still try the edge stub (it can insert via service role).
+                    let session = await PaymentService.shared.startCheckout(
+                        amount: order.total,
+                        purpose: "mint_fee",
+                        mintOrderId: order.order_id
+                    )
+                    couponValid = false
+                    if let url = session.checkoutURL {
+                        await UIApplication.shared.open(url)
+                        couponMessage = "Checkout opened."
+                    } else {
+                        couponMessage = PaymentService.shared.available
+                            ? (session.message.isEmpty ? error.localizedDescription : session.message)
+                            : "Paid checkout needs §5.18 SQL — apply a coupon to mint now."
+                    }
+                }
+            }
+        } catch {
+            couponValid = false
+            couponMessage = error.localizedDescription
+        }
+    }
+}
+
 /// Thin UIKit share-sheet wrapper (ShareLink can't be presented imperatively
 /// from an alert action).
 struct ShareSheet: UIViewControllerRepresentable {
@@ -164,4 +323,82 @@ struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Collab picker
+
+private struct CollabPickerRow: View {
+    @ObservedObject private var collabs = CollabStore.shared
+    @State private var query = ""
+    @State private var results: [ARCreator] = []
+    @State private var searching = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !collabs.pendingCollabIds.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(collabs.pendingCollabIds, id: \.self) { id in
+                            let creator = CreatorCache.shared.creator(id)
+                            HStack(spacing: 6) {
+                                Text("@\(creator?.username ?? String(id.uuidString.prefix(6)))")
+                                    .font(.caption.weight(.semibold))
+                                Button {
+                                    collabs.removePending(id)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color.purple.opacity(0.14)))
+                        }
+                    }
+                }
+            }
+
+            HStack {
+                TextField("Search @handle", text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .onSubmit { Task { await runSearch() } }
+                if searching { ProgressView() }
+            }
+
+            ForEach(results.prefix(6)) { person in
+                Button {
+                    collabs.addPending(person.id)
+                    query = ""
+                    results = []
+                } label: {
+                    HStack(spacing: 10) {
+                        ARAvatarView(url: person.avatarUrl, name: person.displayName, size: 28)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(person.displayName).font(.subheadline.weight(.semibold))
+                            Text("@\(person.username)").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "plus.circle.fill").foregroundStyle(.purple)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .onChange(of: query) { _, q in
+            guard q.count >= 2 else { results = []; return }
+            Task {
+                try? await Task.sleep(nanoseconds: 280_000_000)
+                guard query == q else { return }
+                await runSearch()
+            }
+        }
+    }
+
+    private func runSearch() async {
+        searching = true
+        defer { searching = false }
+        results = await PeopleSearch.search(query, limit: 8)
+    }
 }

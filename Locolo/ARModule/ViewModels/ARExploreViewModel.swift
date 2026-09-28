@@ -77,6 +77,9 @@ final class ARExploreViewModel: ObservableObject {
         FollowStore.shared.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &observers)
+        SafetyExtrasStore.shared.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &observers)
     }
 
     private var myId: UUID? {
@@ -112,11 +115,14 @@ final class ARExploreViewModel: ObservableObject {
 
     /// The full feed for the active filter.
     var feedAssets: [DigitalAsset] {
+        let muted = SafetyExtrasStore.shared.muted
         let base = SafetyService.shared.visible(allAssets)
+            .filter { !muted.contains($0.userId) }
         switch feedFilter {
         case .forYou:
             // Prefer the server-ranked personalized feed; fall back to newest.
             let recs = SafetyService.shared.visible(recommendedAssets)
+                .filter { !muted.contains($0.userId) }
             return recs.isEmpty
                 ? base.sorted { $0.createdAt > $1.createdAt }
                 : recs
@@ -134,6 +140,29 @@ final class ARExploreViewModel: ObservableObject {
                 ($1.distanceMeters ?? .greatestFiniteMagnitude)
             }
         }
+    }
+
+    /// Nearby ∩ high engagement — “Trending near you” rail.
+    var trendingNearYou: [DigitalAsset] {
+        let muted = SafetyExtrasStore.shared.muted
+        return SafetyService.shared.visible(allAssets)
+            .filter { !muted.contains($0.userId) }
+            .filter { ($0.distanceMeters ?? .infinity) < 2_000 }
+            .sorted { $0.engagementScore > $1.engagementScore }
+            .prefix(12)
+            .map { $0 }
+    }
+
+    /// Created today — “Drops today” rail.
+    var dropsToday: [DigitalAsset] {
+        let muted = SafetyExtrasStore.shared.muted
+        let cal = Calendar.current
+        return SafetyService.shared.visible(allAssets)
+            .filter { !muted.contains($0.userId) }
+            .filter { cal.isDateInToday($0.createdAt) }
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(12)
+            .map { $0 }
     }
 
     /// The slice currently rendered; grows as the user scrolls.

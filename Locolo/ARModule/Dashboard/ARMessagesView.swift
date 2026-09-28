@@ -19,6 +19,7 @@ struct ARMessagesView: View {
 
     @State private var query = ""
     @State private var showCompose = false
+    @State private var showGroupScaffold = false
     @State private var pendingDelete: Conversation?
     @State private var isOpening = false
 
@@ -50,10 +51,17 @@ struct ARMessagesView: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { showCompose = true } label: {
+                Menu {
+                    Button { showCompose = true } label: {
+                        Label("New message", systemImage: "square.and.pencil")
+                    }
+                    Button { showGroupScaffold = true } label: {
+                        Label("New group", systemImage: "person.3")
+                    }
+                } label: {
                     Image(systemName: "square.and.pencil")
                 }
-                .accessibilityLabel("New message")
+                .accessibilityLabel("Compose")
             }
         }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search")
@@ -61,6 +69,21 @@ struct ARMessagesView: View {
             ARNewMessageSheet { person in
                 Task { await openChat(with: person.id) }
             }
+        }
+        .sheet(isPresented: $showGroupScaffold) {
+            NavigationStack {
+                ARInlineEmptyState(
+                    icon: "lock.shield.fill",
+                    title: "Group chats coming soon",
+                    subtitle: "1:1 messages stay end-to-end encrypted today. Multi-person sender-keys land after chat identity (§5.8) — we won't store plaintext groups."
+                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { showGroupScaffold = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
         }
         .confirmationDialog("Delete this conversation?", isPresented: Binding(
             get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }

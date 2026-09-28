@@ -31,6 +31,16 @@ struct SocialActivity: Identifiable, Hashable {
         case newPost
         case discovery
         case milestone(metric: String, count: Int)
+        case repost
+        case collect
+        case reaction(String)
+        case remix
+        case questComplete
+        case levelUp
+        case sale
+        case outbid
+        case eventReminder
+        case storyView
     }
 
     let id: String
@@ -51,6 +61,16 @@ struct SocialActivity: Identifiable, Hashable {
         case .newPost: return "new_post"
         case .discovery: return "discovery"
         case .milestone: return "milestone"
+        case .repost: return "repost"
+        case .collect: return "collect"
+        case .reaction: return "reaction"
+        case .remix: return "remix"
+        case .questComplete: return "quest_complete"
+        case .levelUp: return "level_up"
+        case .sale: return "sale"
+        case .outbid: return "outbid"
+        case .eventReminder: return "event_reminder"
+        case .storyView: return "story_view"
         }
     }
 }
@@ -251,7 +271,7 @@ final class ActivityStore: ObservableObject {
         switch type {
         case "follow": return .follow
         case "hype": return .hype
-        case "comment": return .comment(text)
+        case "comment", "comment_reply": return .comment(text)
         case "mention": return .mention(text)
         case "offer": return .offer(amount: Double(text) ?? 0, status: "pending")
         case "offer_status":
@@ -264,6 +284,17 @@ final class ActivityStore: ObservableObject {
             let parts = text.split(separator: ":", maxSplits: 1).map(String.init)
             guard parts.count == 2, let count = Int(parts[1]) else { return nil }
             return .milestone(metric: parts[0], count: count)
+        case "repost": return .repost
+        case "collect": return .collect
+        case "reaction": return .reaction(text.isEmpty ? "✨" : text)
+        case "remix", "tag": return .remix
+        case "quest_complete": return .questComplete
+        case "level_up": return .levelUp
+        case "sale", "royalty": return .sale
+        case "outbid": return .outbid
+        case "event_reminder": return .eventReminder
+        case "story_view": return .storyView
+        case "comment_like": return .hype
         default: return nil
         }
     }
@@ -460,6 +491,26 @@ final class ActivityStore: ObservableObject {
             return metric == "views"
                 ? ("👀 \(count) explorers found \(art)", nil, "Your creation is a local landmark.", assetURL, "milestones")
                 : ("🔥 \(art) hit \(count) hypes", nil, "Keep creating — people love this one.", assetURL, "milestones")
+        case .repost:
+            return ("🔁 \(who) reposted \(art)", nil, "Your drop is traveling.", assetURL, assetThread)
+        case .collect:
+            return ("📌 \(who) saved \(art)", nil, "Added to a board.", assetURL, assetThread)
+        case .reaction(let emoji):
+            return ("\(emoji) \(who) reacted to \(art)", nil, "Someone felt that.", assetURL, assetThread)
+        case .remix:
+            return ("🎨 \(who) remixed \(art)", nil, "A new take just dropped.", assetURL, assetThread)
+        case .questComplete:
+            return ("🏆 Quest complete", nil, "You crushed a weekly quest.", nil, "quests")
+        case .levelUp:
+            return ("⬆️ Level up!", nil, "Your Passport leveled up.", nil, "quests")
+        case .sale:
+            return ("💸 Sale!", nil, "\(who) bought \(art).", assetURL, "sales")
+        case .outbid:
+            return ("📉 You were outbid", nil, "Someone raised the bid on \(art).", assetURL, "offers")
+        case .eventReminder:
+            return ("📅 Event soon", nil, "An AR meetup is starting soon.", nil, "events")
+        case .storyView:
+            return ("👁 \(who) viewed your story", handle, "Tap to see who's watching.", userURL, "stories")
         }
     }
 }

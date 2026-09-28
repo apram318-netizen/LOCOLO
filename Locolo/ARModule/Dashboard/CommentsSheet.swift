@@ -29,12 +29,19 @@ struct CommentsSheet: View {
     @State private var reporting: AssetComment?
     @State private var pendingDelete: AssetComment?
     @State private var reportedToast = false
+    @State private var replyTo: AssetComment?
     @FocusState private var composerFocused: Bool
 
     private static let quickReactions = ["🔥", "😍", "👏", "🤯", "✨", "💜"]
 
     private var me: UUID? { userVM.currentUser?.id }
     private var visibleComments: [AssetComment] { safety.visible(comments) }
+    private var rootComments: [AssetComment] {
+        visibleComments.filter { $0.parentId == nil }
+    }
+    private func replies(to parent: UUID) -> [AssetComment] {
+        visibleComments.filter { $0.parentId == parent }
+    }
     private var trimmedDraft: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
@@ -119,25 +126,25 @@ struct CommentsSheet: View {
     private var list: some View {
         ScrollViewReader { proxy in
             List {
-                ForEach(visibleComments) { comment in
-                    row(comment)
+                ForEach(rootComments) { comment in
+                    row(comment, isReply: false)
                         .id(comment.id)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 8, leading: 18, bottom: 8, trailing: 18))
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if canDelete(comment) {
-                                Button(role: .destructive) { pendingDelete = comment } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                            if comment.userId != me {
-                                Button { reporting = comment } label: {
-                                    Label("Report", systemImage: "flag")
-                                }
-                                .tint(.orange)
-                            }
+                            swipeActions(for: comment)
                         }
+                    ForEach(replies(to: comment.id)) { reply in
+                        row(reply, isReply: true)
+                            .id(reply.id)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 52, bottom: 4, trailing: 18))
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                swipeActions(for: reply)
+                            }
+                    }
                 }
             }
             .listStyle(.plain)
@@ -151,11 +158,26 @@ struct CommentsSheet: View {
         }
     }
 
-    private func row(_ comment: AssetComment) -> some View {
+    @ViewBuilder
+    private func swipeActions(for comment: AssetComment) -> some View {
+        if canDelete(comment) {
+            Button(role: .destructive) { pendingDelete = comment } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        if comment.userId != me {
+            Button { reporting = comment } label: {
+                Label("Report", systemImage: "flag")
+            }
+            .tint(.orange)
+        }
+    }
+
+    private func row(_ comment: AssetComment, isReply: Bool) -> some View {
         let author = creators.creator(comment.userId)
         return HStack(alignment: .top, spacing: 12) {
             Button { openProfile(comment.userId) } label: {
-                ARAvatarView(url: author?.avatarUrl, name: author?.displayName ?? "?", size: 36)
+                ARAvatarView(url: author?.avatarUrl, name: author?.displayName ?? "?", size: isReply ? 28 : 36)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open \(author?.displayName ?? "creator")'s profile")
@@ -181,11 +203,30 @@ struct CommentsSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
 
-                if comment.userId != me {
+                HStack(spacing: 14) {
+                    if CommentsRepository.shared.likesAvailable {
+                        Button {
+                            Task { await toggleLike(comment) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: comment.likedByMe ? "heart.fill" : "heart")
+                                    .font(.caption)
+                                    .foregroundColor(comment.likedByMe ? .pink : .secondary)
+                                if comment.likeCount > 0 {
+                                    Text("\(comment.likeCount)")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     Button {
+                        replyTo = comment
                         let handle = author?.username ?? ""
                         if !handle.isEmpty, !draft.contains("@\(handle)") {
-                            draft = "@\(handle) " + draft
+                            draft = "@\(handle) "
                         }
                         composerFocused = true
                     } label: {
@@ -194,8 +235,8 @@ struct CommentsSheet: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .padding(.top, 2)
                 }
+                .padding(.top, 2)
             }
             Spacer(minLength: 0)
         }
@@ -217,6 +258,26 @@ struct CommentsSheet: View {
                     Label("Block \(author?.displayName ?? "user")", systemImage: "hand.raised")
                 }
             }
+            if me == asset.userId, CommentsRepository.shared.moderationAvailable {
+                Button {
+                    Task {
+                        try? await CommentsRepository.shared.setPinned(
+                            commentId: comment.id, pinned: !comment.pinned)
+                        await load()
+                    }
+                } label: {
+                    Label(comment.pinned ? "Unpin" : "Pin comment", systemImage: "pin")
+                }
+                Button {
+                    Task {
+                        try? await CommentsRepository.shared.setHiddenByCreator(
+                            commentId: comment.id, hidden: true)
+                        await load()
+                    }
+                } label: {
+                    Label("Hide comment", systemImage: "eye.slash")
+                }
+            }
             if canDelete(comment) {
                 Button(role: .destructive) { pendingDelete = comment } label: {
                     Label("Delete", systemImage: "trash")
@@ -235,6 +296,20 @@ struct CommentsSheet: View {
                     .foregroundColor(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 18)
+            }
+
+            if let replyTo {
+                HStack {
+                    Text("Replying to comment")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button("Cancel") {
+                        self.replyTo = nil
+                    }
+                    .font(.caption.weight(.bold))
+                }
+                .padding(.horizontal, 18)
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -361,25 +436,40 @@ struct CommentsSheet: View {
         banner = nil
         defer { isPosting = false }
         do {
-            let comment = try await CommentsRepository.shared.post(assetId: asset.id, userId: me, body: trimmedDraft)
+            let parent = replyTo.map { $0.parentId ?? $0.id } // reply to root of thread
+            let comment = try await CommentsRepository.shared.post(
+                assetId: asset.id, userId: me, body: trimmedDraft, parentId: parent)
             await CreatorCache.shared.load([me])
             withAnimation(ARDesign.spring) { comments.append(comment) }
             EngagementStore.shared.adjustCommentCount(by: 1, for: asset.id)
             draft = ""
+            replyTo = nil
             ARHaptics.success()
-        } catch let error as CommentsError {
-            if case .unavailable = error { phase = .unavailable }
-            banner = error.localizedDescription
-            ARHaptics.warning()
         } catch {
-            banner = CommentsError.failed.localizedDescription
-            ARHaptics.warning()
+            banner = error.localizedDescription
+        }
+    }
+
+    private func toggleLike(_ comment: AssetComment) async {
+        guard let idx = comments.firstIndex(where: { $0.id == comment.id }) else { return }
+        let was = comments[idx].likedByMe
+        comments[idx].likedByMe.toggle()
+        comments[idx].likeCount += was ? -1 : 1
+        do {
+            let nowOn = try await CommentsRepository.shared.toggleLike(commentId: comment.id)
+            comments[idx].likedByMe = nowOn
+            if !was && nowOn { ARHaptics.tick() }
+        } catch {
+            comments[idx].likedByMe = was
+            comments[idx].likeCount += was ? 1 : -1
         }
     }
 
     private func delete(_ comment: AssetComment) async {
         let snapshot = comments
-        withAnimation(ARDesign.spring) { comments.removeAll { $0.id == comment.id } }
+        withAnimation(ARDesign.spring) {
+            comments.removeAll { $0.id == comment.id || $0.parentId == comment.id }
+        }
         do {
             try await CommentsRepository.shared.delete(commentId: comment.id)
             EngagementStore.shared.adjustCommentCount(by: -1, for: asset.id)

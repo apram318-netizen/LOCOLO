@@ -71,7 +71,12 @@ extension ARDisplayViewModel {
         if target.distance <= Self.foundRadius {
             if DiscoveryStore.shared.markFound(target.asset.id) {
                 justFound = target.asset
-                ARHaptics.success()
+                if target.asset.isRareFind {
+                    ARHaptics.found()
+                } else {
+                    ARHaptics.success()
+                }
+                LocoloAnalytics.assetFound(rare: target.asset.isRareFind)
                 Task { [weak self] in
                     try? await Task.sleep(nanoseconds: 3_500_000_000)
                     if self?.justFound?.id == target.asset.id { self?.justFound = nil }

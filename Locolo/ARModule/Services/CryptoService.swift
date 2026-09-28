@@ -27,9 +27,11 @@ final class CryptoService {
     }
 
     private let keychainAccount = "com.locolo.chat.x25519.identity"
+    private let signingAccount = "com.locolo.provenance.ed25519.identity"
     private let hkdfInfo = Data("locolo-chat-v1".utf8)
 
     private var cachedPrivateKey: Curve25519.KeyAgreement.PrivateKey?
+    private var cachedSigningKey: Curve25519.Signing.PrivateKey?
     private var conversationKeys: [String: SymmetricKey] = [:]
 
     private init() {}
@@ -46,7 +48,7 @@ final class CryptoService {
     private func privateKey() throws -> Curve25519.KeyAgreement.PrivateKey {
         if let cached = cachedPrivateKey { return cached }
 
-        switch loadKeychain() {
+        switch loadKeychain(account: keychainAccount) {
         case .found(let data):
             if let key = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data) {
                 cachedPrivateKey = key
@@ -59,10 +61,66 @@ final class CryptoService {
         }
 
         let key = Curve25519.KeyAgreement.PrivateKey()
-        let status = saveKeychain(key.rawRepresentation)
+        let status = saveKeychain(key.rawRepresentation, account: keychainAccount)
         guard status == errSecSuccess else { throw CryptoError.keychainUnavailable(status) }
         cachedPrivateKey = key
         return key
+    }
+
+    // MARK: - Signing identity (Ed25519) — authenticity / provenance
+
+    /// The device's Ed25519 signing key, minted on first use. Separate from the
+    /// key-agreement key above (agreement keys can't sign). Same mint-only-when-
+    /// absent safety so a locked Keychain never silently rotates it.
+    private func signingKey() throws -> Curve25519.Signing.PrivateKey {
+        if let cached = cachedSigningKey { return cached }
+        switch loadKeychain(account: signingAccount) {
+        case .found(let data):
+            if let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: data) {
+                cachedSigningKey = key
+                return key
+            }
+        case .missing:
+            break
+        case .failed(let status):
+            throw CryptoError.keychainUnavailable(status)
+        }
+        let key = Curve25519.Signing.PrivateKey()
+        let status = saveKeychain(key.rawRepresentation, account: signingAccount)
+        guard status == errSecSuccess else { throw CryptoError.keychainUnavailable(status) }
+        cachedSigningKey = key
+        return key
+    }
+
+    /// Base64 Ed25519 public key to publish so others can verify this device's
+    /// signatures, or nil if the Keychain can't be read.
+    var mySigningPublicKeyBase64: String? {
+        try? signingKey().publicKey.rawRepresentation.base64EncodedString()
+    }
+
+    /// Sign a message string, returning a base64 signature (or nil on failure).
+    func sign(_ message: String) -> String? {
+        guard let key = try? signingKey(),
+              let sig = try? key.signature(for: Data(message.utf8)) else { return nil }
+        return sig.base64EncodedString()
+    }
+
+    /// Verify a base64 Ed25519 signature over `message` against a base64 public key.
+    static func verify(signatureBase64: String, message: String, publicKeyBase64: String) -> Bool {
+        guard let sig = Data(base64Encoded: signatureBase64),
+              let pubData = Data(base64Encoded: publicKeyBase64),
+              let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: pubData) else { return false }
+        return pub.isValidSignature(sig, for: Data(message.utf8))
+    }
+
+    /// SHA-256 hex of arbitrary data — the content hash for asset authenticity.
+    static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// SHA-256 hex of a string (used to recompute provenance record hashes).
+    static func sha256Hex(_ string: String) -> String {
+        sha256Hex(Data(string.utf8))
     }
 
     /// Base64 raw public key to publish so others can encrypt to this device,
@@ -130,10 +188,10 @@ final class CryptoService {
     // MARK: - Keychain
 
     @discardableResult
-    private func saveKeychain(_ data: Data) -> OSStatus {
+    private func saveKeychain(_ data: Data, account: String) -> OSStatus {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: keychainAccount
+            kSecAttrAccount as String: account
         ]
         SecItemDelete(base as CFDictionary)
 
@@ -143,10 +201,10 @@ final class CryptoService {
         return SecItemAdd(attrs as CFDictionary, nil)
     }
 
-    private func loadKeychain() -> KeychainRead {
+    private func loadKeychain(account: String) -> KeychainRead {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: keychainAccount,
+            kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]

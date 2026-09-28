@@ -29,7 +29,7 @@ struct ARPlacementView: UIViewRepresentable {
         config.planeDetection = [.horizontal]
         config.environmentTexturing = .automatic
         arView.session.run(config)
-        print(" AR session started")
+        LocoloLog.debug(LocoloLog.ar, "placement session started")
 
         // --- Add Coaching Overlay (helps with localization) ---
         let coaching = ARCoachingOverlayView()
@@ -46,17 +46,17 @@ struct ARPlacementView: UIViewRepresentable {
         Task {
             do {
                 let localURL = try await context.coordinator.downloadToLocal(modelURL)
-                print(" Downloaded model to:", localURL.lastPathComponent)
+                LocoloLog.debug(LocoloLog.ar, "model downloaded")
 
                 context.coordinator.cancellable = ModelEntity.loadModelAsync(contentsOf: localURL)
                     .sink(
                         receiveCompletion: { completion in
                             if case let .failure(error) = completion {
-                                print(" Model load failed:", error.localizedDescription)
+                                LocoloLog.ar.error("model load failed: \(error.localizedDescription, privacy: .public)")
                             }
                         },
                         receiveValue: { entity in
-                            print(" Model entity loaded")
+                            LocoloLog.debug(LocoloLog.ar, "model entity loaded")
                             entity.generateCollisionShapes(recursive: true)
                             // No .translation: the saved position is the user's
                             // GPS point, so letting them drag the model would be
@@ -64,15 +64,24 @@ struct ARPlacementView: UIViewRepresentable {
                             arView.installGestures([.rotation, .scale], for: entity)
 
                             let anchor = AnchorEntity(plane: .horizontal)
+                            // Soft contact shadow so grounding is easier to judge.
+                            let shadow = ModelEntity(
+                                mesh: .generateCylinder(height: 0.002, radius: 0.18),
+                                materials: [UnlitMaterial(color: UIColor.black.withAlphaComponent(0.28))])
+                            shadow.position = [0, 0.001, 0]
+                            shadow.name = "placementShadow"
+                            anchor.addChild(shadow)
                             anchor.addChild(entity)
                             arView.scene.addAnchor(anchor)
 
                             context.coordinator.entity = entity
-                            print("📍 Entity anchored and interactive")
+                            context.coordinator.shadowEntity = shadow
+                            context.coordinator.baseScale = entity.scale
+                            LocoloLog.debug(LocoloLog.ar, "entity anchored")
                         }
                     )
             } catch {
-                print(" Download or load failed:", error)
+                LocoloLog.ar.error("download/load failed: \(error.localizedDescription, privacy: .public)")
             }
         }
 
@@ -84,7 +93,7 @@ struct ARPlacementView: UIViewRepresentable {
         longPress.minimumPressDuration = 0.6
         longPress.delegate = context.coordinator
         arView.addGestureRecognizer(longPress)
-        print(" Long-press gesture added")
+        LocoloLog.debug(LocoloLog.ar, "long-press gesture installed")
 
         // --- Floating Guidance Label ---
         let label = UILabel()
@@ -104,6 +113,21 @@ struct ARPlacementView: UIViewRepresentable {
             label.widthAnchor.constraint(lessThanOrEqualTo: arView.widthAnchor, multiplier: 0.9)
         ])
 
+        // True-size reset control (placement finesse).
+        let trueSize = UIButton(type: .system)
+        trueSize.setTitle(" True size ", for: .normal)
+        trueSize.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        trueSize.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        trueSize.setTitleColor(.white, for: .normal)
+        trueSize.layer.cornerRadius = 8
+        trueSize.translatesAutoresizingMaskIntoConstraints = false
+        trueSize.addTarget(context.coordinator, action: #selector(Coordinator.resetTrueSize), for: .touchUpInside)
+        arView.addSubview(trueSize)
+        NSLayoutConstraint.activate([
+            trueSize.trailingAnchor.constraint(equalTo: arView.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            trueSize.topAnchor.constraint(equalTo: arView.safeAreaLayoutGuide.topAnchor, constant: 12)
+        ])
+
         // Keep view model + guidance label references inside coordinator
         context.coordinator.vm = vm
         context.coordinator.guidanceLabel = label
@@ -119,9 +143,23 @@ struct ARPlacementView: UIViewRepresentable {
     // MARK: - Coordinator
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var entity: ModelEntity?
+        var shadowEntity: ModelEntity?
+        var baseScale: SIMD3<Float> = .one
         var cancellable: AnyCancellable?
         weak var vm: ARCreateViewModel?
         weak var guidanceLabel: UILabel?
+
+        @objc func resetTrueSize() {
+            guard let entity else { return }
+            entity.scale = baseScale
+            // Softly resize the contact shadow with the model.
+            if let shadowEntity {
+                let avg = (baseScale.x + baseScale.z) * 0.5
+                shadowEntity.scale = [max(0.4, avg), 1, max(0.4, avg)]
+            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            guidanceLabel?.text = "Reset to true size — rotate/scale, then hold to place"
+        }
 
         // Allow gestures to coexist
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
@@ -132,10 +170,10 @@ struct ARPlacementView: UIViewRepresentable {
         // Handle long-press confirmation
         @objc func confirm(_ sender: UILongPressGestureRecognizer) {
             guard sender.state == .began else { return }
-            print(" [Coordinator] Long press detected")
+            LocoloLog.debug(LocoloLog.ar, "placement long-press")
 
             guard let entity = entity else {
-                print(" [Coordinator] No entity to place")
+                LocoloLog.ar.error("placement confirm with no entity")
                 return
             }
 
@@ -154,7 +192,7 @@ struct ARPlacementView: UIViewRepresentable {
             let worldScale = entity.scale(relativeTo: nil)
 
             DispatchQueue.main.async {
-                print(" [Coordinator] Saving world-space placement to ViewModel & navigating")
+                LocoloLog.debug(LocoloLog.ar, "placement confirmed")
                 self.vm?.setPlacement(rotationWorld: worldRotation, scale: worldScale)
 
                 // Push "details" destination after a short delay

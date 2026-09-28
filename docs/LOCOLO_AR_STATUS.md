@@ -4,9 +4,13 @@
 > **Companion to:** `docs/LOCOLO_AR_RELEASE_SPEC.md` (the WS0–WS9 V1 spec — read it for intent; read THIS for what actually exists and how to finish it).
 > **Next phase (design, not built):** `docs/LOCOLO_V2_ROADMAP.md` (umbrella) → `LOCOLO_V2_MARKETPLACE.md` (blockchain/trading/payments/portfolio graphs), `LOCOLO_V2_SOCIAL_AND_UI.md` (deeper social + Gen-Z design), `LOCOLO_V2_SECURITY.md` (security/compliance for money+keys). Start with the Roadmap's §3 decision table.
 > **AR polish backlog:** `docs/LOCOLO_AR_POLISH.md` — prioritized enhancements to the *existing* AR module (spatial audio, video-as-texture, trigger effects, discovery reveal, occlusion, AR video capture, creation finesse).
-> **Last updated:** 2026-09-27 · branch `fresh-start` · simulator build green via `xcodebuild`.
-> **Git state:** stage 8 committed on `fresh-start` (local; push with §5.2). Stage 6 is `9f73f48`. GitHub `main` (`447c938`) is a direct ancestor, so merging is a fast-forward (§5.2).
-> **🟢 DB migrations now APPLIED to prod (2026-09-28):** safety/hardening (§5.3), social/comments (§5.3b), and notifications (§5.3c step 1) are all live, plus a flat-view RLS fix. RLS is on for all 26 tables; the critical "anon can read every email / hype as anyone" hole is closed. Still pending: `send-push` deploy + webhook + `push_enabled` flip (§5.3c steps 2–6), edge functions (§5.4), chat identity binding (§5.8).
+> **Last updated:** 2026-09-28 · branch `fresh-start` · tip `626b940` (9 commits ahead of `github/fresh-start`).
+> **Where work is:** V2 Phase A–D client coded in the working tree (uncommitted). Marketplace B/C foundations + Phase D social bulk. Real partner checkout / chain contracts still need edge fns + audits.
+>
+> **🟢 ALL SQL APPLIED — §5.10–§5.28 done (2026-09-28).** Every pending V2 migration is live in prod and verified (28 tables / 29 RPCs / 7 triggers / 65 RLS tables; no ERROR-level advisor findings). **⚠️ Four of the .sql files need fixes before they can be re-run verbatim — see §6b.** Full remaining plan: `LOCOLO_V2_COMPLETION_PLAN.md`.
+> **🟢 V1 DB migrations APPLIED (2026-09-28):** safety/hardening, social/comments, notifications (step 1), flat-view RLS fix. Remaining work is **deploy/keys/device only**: §5.3c steps 2–6 (APNs + `send-push` + webhook + `push_enabled`), edge functions incl. `purge-storage` (§5.4 / §5.25), chat identity binding (§5.8), on-device QA (§5.7), contract audit + partner keys.
+> **🟢 Client ship-ready (stage 19):** stage 18 polish + Phase B `onramp-session` client, post-trade asset refresh, Activity V2 filters, AR location usage strings, hot-path `LocoloLog`, §5.28 trigger CHECK SQL. **No further in-repo client work required for ship** — owner SQL/deploy/partners/QA remain.
+> **🟢 V2 Phase A trading DB APPLIED:** `2026_v2_marketplace_phase_a.sql`. Mint/coupons/provenance: draft was live; **canonical fixed SQL is now in the repo** — re-apply §5.10.
 
 ---
 
@@ -53,9 +57,11 @@ Key code map:
 | Social stores (stage 6) | `Services/{EngagementStore,FollowStore,InboxStore,ActivityStore,CreatorCache,SocialSession,CommentsRepository,PeopleSearch}.swift` |
 | Social UI (stage 6) | `ARSocialComponents.swift`, `Dashboard/{CommentsSheet,ARActivityView,AREditProfileView,ARMessagesView,ARSocialAssetCard}.swift`, `ARTabBar.swift` |
 | Notifications (stage 7) | `Services/{ARNotificationRouter,PushRegistry,NotificationPreferences,ProximityNotifier}.swift` (+ `BadgeSync`, `ARPushEvents` in the router file); hooks in `NotificationManager`, `AppDelegate`, `ChatViewModel.sendMessage` |
+| Minting / authenticity (WIP) | `Services/{MintingService,CryptoService,KeyDirectory}.swift`, `Creation/{DetailsStepView,ARCreateViewModel}.swift` — see §4.10 |
 | Chat (E2E) | `Services/CryptoService.swift`, `Services/KeyDirectory.swift`, `ViewModels/ChatViewModel.swift`, `Views/Messages/ChatView.swift`, `Dashboard/ARChatScreen.swift`, `ARMessagesView.swift` |
 | Safety / account | `Services/SafetyService.swift`, `Dashboard/ReportSheet.swift`, `Dashboard/ARSettingsView.swift` |
-| SQL | `docs/migrations/2026_ar_release.sql` (applied), `2026_ar_safety_and_hardening.sql` (**not applied**), `2026_ar_social.sql` (**not applied**, run after safety), `2026_ar_notifications.sql` (**not applied**, run after social) |
+| SQL (applied) | `2026_ar_release.sql`, `2026_ar_safety_and_hardening.sql`, `2026_ar_social.sql`, `2026_ar_notifications.sql`, `2026_ar_flat_view_rls.sql`, `2026_v2_marketplace_phase_a.sql` |
+| SQL (missing from repo) | Coupons + mint-orders + provenance layer that is **live in prod** — must be dumped (§5.10 / §7) |
 | Edge functions | `supabase/functions/{embed-asset,update-taste,embed-query,send-push,_shared}` + `README.md` |
 
 ## 3. Workstream status
@@ -73,7 +79,9 @@ Key code map:
 | WS6 E2E chat | ✅ core · ⏳ identity binding | No plaintext paths left; Firebase auth still anonymous (§5.8). |
 | WS7 hand-draw | ✅ rebuilt · ⏳ device | SceneKit USDZ export, per-stroke colour, widths (§4.2). |
 | WS8 perf | ✅ | Media cache fixed, download coalescing, 40-entity cap per pass. |
-| WS9 release | ⏳ | Permission strings done; safety migration written but **not applied** (§5.3); store checklist §5.9. |
+| WS9 release | ⏳ | Permission strings done; V1 safety/social/notifications migrations **applied**; store checklist §5.9; push + edge fns still pending. |
+| V2 Phase A marketplace | 🟡 code · ⏳ apply SQL | Trading DB applied. Client: `MarketplaceRepository` + `MarketplaceSheet` (list/buy/cancel) + portfolio chart + provenance timeline. Uncommitted. |
+| V2 mint / coupons / provenance | 🟡 code · ⏳ apply SQL | Canonical SQL in repo (§5.10) fixes coupon bug + adds `attach_mint_order`. Swift mint paywall + Ed25519 authenticity build-green, uncommitted. |
 
 ## 4. Everything that has been done
 
@@ -146,6 +154,9 @@ Scope rule: stage 6 touches **only `ARModule/` and `docs/`**. No legacy screens,
   - `InboxStore`: live Firestore conversation list, peers, unread count. Unread means the thread changed after you last had it open. `ARChatScreen` calls `didOpen`/`didClose`, and threads first seen on a device start as read. Read state is cached locally (`ar.inbox.lastRead`) and, since stage 7, synced across your own devices (§4.9); nothing is sent to the peer and the chat data model is unchanged.
   - `ActivityStore`: the activity feed. Since stage 7 it reads the server `notifications` table (§4.9); before that migration it aggregates follows, hypes, comments and offers client-side, and unread means newer than `ar.activity.lastSeen` (set when you leave the Activity screen).
   - `CreatorCache`: one batch-loaded `ARCreator` cache for every surface.
+  - `StoryStore` (Phase D): 24h story rail via `get_story_rail`; post + `mark_story_viewed`. Reset in `SocialSession.end()`. Hides the rail when §5.11 isn't applied.
+  - `BoardsStore` (Phase D): curated boards via `get_user_boards` / `get_board_item_ids`. Reset in `SocialSession.end()`. Hides boards when §5.12 isn't applied.
+  - Tier 2–3 (Phase D, §5.20): `ReactionStore`, `RemixStore`, `CollabStore`, `PollStore`, `PresenceStore`, `EventsStore`, `SafetyExtrasStore` — all configure/reset in `SocialSession`. Degrade when schema missing.
 - **Comments:** `CommentsSheet` (resizable) offers a threaded list, a composer with quick emoji reactions, reply-by-mention, a "Creator" tag on the author's own comments, swipe/long-press Delete (own comment or your asset) and Report (reason picker via `SafetyService.reportComment`, with instant local hide), plus Block. Blocked users are filtered out. It degrades to "Comments are coming soon" before the migration.
 - **Feed card:** creator row with inline Follow, relative time and place, and a "…" menu (share, copy link, report). 4:3 media with **double-tap to hype** and a burst animation. Action row: hype with live count, comments with count, share (deep link; this used to share the raw file URL), View in AR (≤ 150 m), and save (bookmark). Caption shows "View all N comments" and explorer count.
 - **Detail sheet:** creator row (avatar, verified badge, @handle, Follow). Hype, comment and view capsules plus share. Comments open over the sheet. New `onOpenProfile` lets comment authors open their profiles.
@@ -159,7 +170,7 @@ Scope rule: stage 6 touches **only `ARModule/` and `docs/`**. No legacy screens,
 - **Search:** a **Creators** rail (username/name `ilike`, ranked exact handle → prefix → verified) with Follow buttons, above asset results.
 - **Deep links:** `locolo://user/<id>` (also `/profile/<id>`) → `DeepLinkRouter.pendingUserId`, consumed by `ARDashboardRootView`. Your own id switches to the Profile tab. Share sheets use `DeepLinkRouter.userURL(for:)`.
 
-### 4.9 Notifications (stage 7, uncommitted)
+### 4.9 Notifications (stage 7, committed)
 Scope: AR module + `docs/` + `supabase/`, plus four small, marked hooks in shared files (listed at the end).
 
 **Events.** Every event becomes one row in `notifications`, written by database triggers (`2026_ar_notifications.sql`). The client never inserts them.
@@ -219,6 +230,37 @@ Scope: AR module + `docs/` + `supabase/`, plus four small, marked hooks in share
 - `ChatViewModel`: remembers the resolved peer and calls `ARPushEvents.messageSent` after a successful send.
 - `Info.plist`: adds `remote-notification` to `UIBackgroundModes`.
 
+### 4.10 Minting, coupons, authenticity & Phase A marketplace (uncommitted, build green)
+**Intent:** every new AR creation is a paid mint (default **$2.99**) on an authenticity ledger. Coupon **`LOCOLO100`** = 100% off for QA. Device signs with Ed25519. Paid checkout is Phase B — until then only waived orders mint. Owners can list/sell off-chain; buyers call `buy_listing`; provenance + portfolio chart surface the history.
+
+**SQL (in repo — apply to prod via §5.10):** `docs/migrations/2026_v2_mint_coupons_provenance.sql`
+- Tables: `coupons` (`code`, `discount_type`, `discount_value`, `max_uses`, `used_count`, …), `mint_orders`, `provenance_records`
+- Columns: `digital_assets.{content_hash,creator_signature,creator_signing_key,owner_id}`, `users.{ed25519_public_key,signing_key_updated_at}`
+- RPCs: `preview_mint_fee` (**fixed** — no ambiguous `code`), `create_mint_order`, **`attach_mint_order(p_order, p_asset)`**
+- Triggers: genesis `mint` provenance on asset insert; `sale` provenance on `trades` insert
+- Seeds `LOCOLO100` percent/100. Locally verified: preview free, create waived, attach → consumed, provenance hash length 64.
+- Trading foundation remains `2026_v2_marketplace_phase_a.sql` (`buy_listing` 7.5% / 2.5%).
+
+**Client (working tree, `xcodebuild` green):**
+
+| File | Role |
+|---|---|
+| `CryptoService` / `KeyDirectory` | Ed25519 signing identity + publish/fetch |
+| `MintingService` | preview / create / **attach** |
+| `ARCreateViewModel` + `DetailsStepView` | hash → sign → insert → attach order; mint paywall + coupon |
+| `MarketplaceRepository` + `MarketplaceSheet` | list / cancel / buy now / provenance timeline |
+| `AssetDetailSheet` | Marketplace entry; owner = `ownerId ?? userId` |
+| `ARProfileViewModel` + Creator Studio | portfolio snapshots + value-over-time chart |
+| `DigitalAsset.ownerId` | optional; RPCs don't return it yet (nil until `get_*` extended) |
+
+**Still open:**
+1. 🔴 **Apply §5.10 SQL in Supabase** (prod still has the broken `preview_mint_fee` until you do).
+2. 🟠 Extend read RPCs with optional `owner_id` (and authenticity fields when the UI needs them).
+3. ✅ Phase B paid mint client: intent + `onramp-session` checkout (partner URL when keys live).
+4. ✅ Auctions / bids UI + live refresh of asset after buy/list/cancel.
+5. 🟡 Commit + push (`fresh-start` already ahead of github).
+6. 🟡 Partner edge deploy + contract audit still required. Phase D social coded — apply §5.11–§5.28.
+
 ## 5. Instructions / runbooks
 
 ### 5.1 Build & run
@@ -233,8 +275,8 @@ Scope: AR module + `docs/` + `supabase/`, plus four small, marked hooks in share
 - **Never** `git push origin` and never force-push.
 - Don't commit `xcuserdata/` files or `Secrets.swift`.
 
-### 5.3 🔴 Apply the safety & hardening migration (highest priority)
-Until this runs, **anyone with the anon key can read every user's email and hype as anyone**, and private/friends assets are readable by all.
+### 5.3 ✅ Apply the safety & hardening migration — DONE 2026-09-28
+Previously: anyone with the anon key could read every user's email and hype as anyone, and private/friends assets were readable by all. **Applied.** Keep the steps below for other environments / rollback.
 
 1. **Ship the current app build first** (TestFlight / all testers updated). Older builds `select *` on `users` and will fail to load profiles once `email` is hidden.
 2. Supabase dashboard → SQL Editor → paste `docs/migrations/2026_ar_safety_and_hardening.sql` → Run. It's one transaction and idempotent (safe to re-run). Watch the output for `Switched … to SECURITY INVOKER` notices.
@@ -355,13 +397,141 @@ Firebase auth is anonymous, so `senderId` is spoofable and `firestore.rules` can
 - **(B, recommended)** Edge function that verifies the Supabase JWT and mints a Firebase custom token with `uid = Supabase user id`; replace `signInAnonymously()` in `ContentView.signInFirebaseIfNeeded()`; deploy `firestore.rules` (add a `delete` rule for full conversation deletes).
 - **(A)** Move chat to Supabase Realtime + RLS.
 
+**Client + stub (stage 18):** iOS already prefers `firebase-custom-token` then falls back to anonymous. Edge stub at `supabase/functions/firebase-custom-token` returns 503 until `FIREBASE_SERVICE_ACCOUNT_JSON` is set and Admin `createCustomToken` is wired. Owner: set secret + finish mint + deploy rules.
+
 ### 5.9 App Store submission checklist
-- [ ] Migration applied (§5.3) and edge functions deployed (§5.4).
+- [x] V1 migrations applied (§5.3 / 5.3b / 5.3c step 1).
+- [ ] Edge functions deployed (§5.4); push fully live (§5.3c steps 2–6).
 - [ ] Moderation owner assigned (§5.6); support contact in the listing.
-- [ ] Privacy policy URL covers location, camera, photos, chat (E2E), account deletion.
-- [ ] Review notes: demo account, a geo-supported test location or note that GPS mode works anywhere.
+- [ ] Privacy policy URL covers location, camera, photos, chat (E2E), account deletion, and (once minting ships) paid minting / marketplace.
+- [ ] Review notes: demo account, a geo-supported test location or note that GPS mode works anywhere; include test coupon `LOCOLO100` only for internal QA.
 - [ ] Reconsider the background-location mode — an AR-only app may get asked to justify it.
-- [ ] Storage cleanup for deleted accounts (scheduled job; `delete_my_account` removes rows, not files).
+- [ ] Storage cleanup for deleted accounts — **SQL + edge ready** (`2026_v2_storage_cleanup.sql` §5.27 + `purge-storage`); apply + schedule cron.
+- [ ] Legal review of mint fee / marketplace framing before any paid path (V2 Security / App Store 3.1.x).
+
+### 5.10 🔴 CLAUDE: ACTION REQUIRED — apply mint / coupons / provenance migration
+> **CLAUDE / AGENT TODO (owner will do this later — do not assume it is done):**
+> Paste `docs/migrations/2026_v2_mint_coupons_provenance.sql` into the Supabase SQL Editor and Run.
+> Until then: coupon apply fails in prod (`code` ambiguous on the old function), `attach_mint_order` is missing, and free mint with `LOCOLO100` cannot be QA'd against live.
+> After applying: check off the verify steps below and remove this CLAUDE marker from the status header + the SQL file header.
+
+Canonical SQL is `docs/migrations/2026_v2_mint_coupons_provenance.sql` (idempotent; fixes the broken prod `preview_mint_fee` and adds `attach_mint_order`).
+
+1. Supabase → SQL Editor → paste the file → Run.
+2. Verify:
+   ```sql
+   select * from public.preview_mint_fee(NULL);         -- fee 2.99
+   select * from public.preview_mint_fee('LOCOLO100');  -- total 0, valid true
+   select * from public.preview_mint_fee('NOPE');       -- valid false
+   select code, discount_type, discount_value, used_count from public.coupons;
+   ```
+3. From a shell (anon key is enough for preview):
+   ```bash
+   curl -s -X POST "$URL/rest/v1/rpc/preview_mint_fee" \
+     -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"p_coupon":"LOCOLO100"}'
+   # expect total 0 — NOT 42702 ambiguous code
+   ```
+4. In the app: Create → apply `LOCOLO100` → "Mint for free" → asset appears; Activity/Marketplace provenance shows a `mint` row.
+
+### 5.11 🔴 CLAUDE: ACTION REQUIRED — apply stories migration (Phase D)
+> **CLAUDE / AGENT TODO (owner will do this later — do not assume it is done):**
+> Paste `docs/migrations/2026_v2_stories.sql` into the Supabase SQL Editor and Run.
+> Until then: `StoryStore` sets `available = false` and Explore hides the story rail. Immersive feed still works (no new tables).
+> After applying: verify the rail loads for a signed-in user who follows someone with an active story (or posts one), then remove this CLAUDE marker from the status header + the SQL file header.
+
+Canonical SQL is `docs/migrations/2026_v2_stories.sql` (idempotent; `stories`, `story_views`, `get_story_rail`, `mark_story_viewed`, `prune_expired_stories`).
+
+1. Supabase → SQL Editor → paste the file → Run.
+2. Verify:
+   ```sql
+   select proname from pg_proc where proname in ('get_story_rail','mark_story_viewed');
+   select tablename from pg_tables where schemaname='public' and tablename in ('stories','story_views');
+   ```
+3. In the app: Explore → "Your story" → share a photo → ring appears; open viewer advances + marks viewed.
+
+### 5.12 🔴 CLAUDE: ACTION REQUIRED — apply boards migration (Phase D)
+> **CLAUDE / AGENT TODO (owner will do this later — do not assume it is done):**
+> Paste `docs/migrations/2026_v2_boards.sql` into the Supabase SQL Editor and Run.
+> Until then: `BoardsStore` sets `available = false`; Creator Studio → Boards and "Save to board" show a coming-soon empty state.
+> After applying: create a board, save an asset from a detail sheet, open the board grid — then remove this CLAUDE marker from the status header + the SQL file header.
+
+Canonical SQL is `docs/migrations/2026_v2_boards.sql` (idempotent; `boards`, `board_items`, `get_user_boards`, `get_board_item_ids`). Spec name "collections" maps to table `boards` (avoids clash with owned-asset "My Collection").
+
+1. Supabase → SQL Editor → paste the file → Run.
+2. Verify:
+   ```sql
+   select proname from pg_proc where proname in ('get_user_boards','get_board_item_ids');
+   select tablename from pg_tables where schemaname='public' and tablename in ('boards','board_items');
+   ```
+3. In the app: Profile → Boards → New board → from any asset "…" → Save to board.
+
+### 5.13 🔴 CLAUDE: ACTION REQUIRED — apply hashtags migration (Phase D)
+> **CLAUDE / AGENT TODO (owner will do this later — do not assume it is done):**
+> Paste `docs/migrations/2026_v2_hashtags.sql` into the Supabase SQL Editor and Run.
+> Until then: `TagStore` hides trending tags; Create → Tags field is a no-op against live.
+> After applying: mint with tags → Search shows "Trending tags" → tap `#slug` filters by tag — then remove this CLAUDE marker.
+
+Canonical SQL is `docs/migrations/2026_v2_hashtags.sql` (`tags`, `asset_tags`, `set_asset_tags`, `get_trending_tags`, `get_asset_tags`, `get_assets_by_tag`).
+
+1. Supabase → SQL Editor → paste → Run.
+2. Verify: `select * from public.get_trending_tags(10);`
+3. Create → add tags → Search → Trending tags chip.
+
+### 5.14 🔴 CLAUDE: ACTION REQUIRED — apply passport / leaderboard migration (Phase D)
+> **CLAUDE / AGENT TODO (owner will do this later — do not assume it is done):**
+> Paste `docs/migrations/2026_v2_passport.sql` into the Supabase SQL Editor and Run.
+> Until then: `ProgressStore` stays unavailable; Explorer Passport keeps using local-only XP; Leaderboard shows coming-soon.
+> After applying: open the app (daily_open XP), find an asset in AR, open Profile → XP Leaderboard — then remove this CLAUDE marker.
+
+Canonical SQL is `docs/migrations/2026_v2_passport.sql` (`user_progress`, `award_progress`, `get_my_progress`, `get_xp_leaderboard`).
+
+1. Supabase → SQL Editor → paste → Run.
+2. Verify: `select * from public.award_progress('daily_open'); select * from public.get_xp_leaderboard(10);`
+3. Profile → XP Leaderboard shows your row.
+
+### 5.15 🔴 CLAUDE: ACTION REQUIRED — apply reposts migration
+Paste `docs/migrations/2026_v2_reposts.sql` → Run. Until then Re-drop control hides. Verify: `select public.toggle_repost('<asset uuid>');`
+
+### 5.16 🔴 CLAUDE: ACTION REQUIRED — apply comment threads migration
+Paste `docs/migrations/2026_v2_comment_threads.sql` → Run (after social). Adds `parent_id` + `comment_likes`. Until then replies stay flat @mentions and likes hide.
+
+### 5.17 🔴 CLAUDE: ACTION REQUIRED — apply weekly quests migration
+Paste `docs/migrations/2026_v2_quests.sql` → Run **after** §5.14 passport (needs `award_progress`). Until then Passport "This week" is empty.
+
+### 5.18 🔴 CLAUDE: ACTION REQUIRED — apply Phase B fiat migration
+Paste `docs/migrations/2026_v2_marketplace_phase_b.sql` → Run. `payment_intents` / `payouts` / `create_payment_intent`. Partner `onramp-session` edge fn still required for Apple Pay / card. Until then paid mint creates no intent.
+
+### 5.19 🔴 CLAUDE: ACTION REQUIRED — apply Phase C on-chain foundation
+Paste `docs/migrations/2026_v2_marketplace_phase_c.sql` → Run (after Phase A wallets). `nft_tokens`, `link_wallet`, `seaport_order` column. No mainnet contracts until Security audit. Settings → Wallet link works after this.
+
+### 5.20 🔴 CLAUDE: ACTION REQUIRED — apply Phase D social Tier 2–3
+Paste `docs/migrations/2026_v2_social_tier23.sql` → Run **after** §5.11–§5.17. Adds `asset_remixes`, `asset_collabs`, `asset_reactions` (+ toggle/summary RPCs), `asset_polls` / votes, `explorer_presence` (+ upsert/nearby RPCs), `ar_events` / RSVPs, `close_friends`, `user_mutes`, comment `pinned` / `hidden_by_creator`. Client stores degrade until applied (`ReactionStore`, `RemixStore`, `PollStore`, `PresenceStore`, `EventsStore`, `SafetyExtrasStore`, `CollabStore`).
+
+### 5.21 🔴 CLAUDE: ACTION REQUIRED — apply auction place_bid / settle RPCs
+Paste `docs/migrations/2026_v2_marketplace_auctions.sql` → Run after Phase A. `place_bid` + `settle_auction`. Marketplace sheet falls back to direct bid insert if missing (no outbid cascade).
+
+### 5.22 🔴 CLAUDE: ACTION REQUIRED — apply V2 notification type extras
+Paste `docs/migrations/2026_v2_notifications_extra.sql` → Run after `2026_ar_notifications.sql` and §5.20. Extends `notifications.type` check + prefs columns (`reposts`, `reactions`, `quests`, `sales`, `events`) and triggers for repost/reaction/remix/collect. Wire `ActivityStore` kinds + Settings toggles already coded.
+
+### 5.23 🟡 Client-complete — group chat scaffold (E2E later)
+No SQL. 1:1 E2E chat remains. Group sender-keys / multi-device is a later crypto pass — do not store plaintext. Track under Security + chat identity (§5.8).
+
+### 5.24 🟡 Client-complete — Gen-Z UX polish (no SQL)
+Celebrations (`CelebrationBurst` / `.celebration`), Explore rails (trending near you / drops today / events / presence), onboarding interests seed (`ar.onboarding.interests`), share-to-story from find banner + AR snapshot, immersive reactions + board save, Studio events link + animated XP. Device QA still required.
+
+### 5.25 🟡 Edge stubs — deploy when partners ready
+`supabase/functions/onramp-session` (Phase B — iOS already calls it), `chain-webhook` (Phase C), `snapshot-portfolio`, `firebase-custom-token`, and `purge-storage` are stubbed in-repo. Deploy + partner keys + legal/audit still required before live money/chain. `send-push` maps V2 types.
+
+### 5.26 🔴 CLAUDE: ACTION REQUIRED — extend get_* RPCs with `owner_id`
+Paste `docs/migrations/2026_v2_rpc_owner_id.sql` → Run after Phase A. Appends `owner_id` to `get_nearby_assets_full` / `get_asset_full` / `get_recommended_assets` (SECURITY INVOKER). Swift already optional-decodes `owner_id`. Until applied, Collection/Marketplace fall back to `userId` via `DigitalAsset.effectiveOwnerId`.
+
+### 5.27 🔴 CLAUDE: ACTION REQUIRED — storage cleanup for deleted accounts
+Paste `docs/migrations/2026_v2_storage_cleanup.sql` → Run. Creates `pending_storage_deletes` + `enqueue_storage_cleanup`, and redefines `delete_my_account` to enqueue Storage paths **before** row deletes. Deploy `supabase/functions/purge-storage` (cron, `--no-verify-jwt`, optional `PURGE_CRON_SECRET`). Until applied, account delete still leaves orphaned files.
+
+### 5.28 🔴 CLAUDE: ACTION REQUIRED — extend trigger_type CHECK
+Paste `docs/migrations/2026_v2_trigger_types.sql` → Run. Prod CHECK still allows only `tap|proximity|speech|shake`. Client also writes `gaze`, `time_of_day`, `long_press`, `multi_tap`, `walk_around` — mint fails for those until applied.
 
 ## 6. Critical invariants (break these = break the app)
 
@@ -378,33 +548,90 @@ Firebase auth is anonymous, so `senderId` is spoofable and `firestore.rules` can
 11. **Social state goes through the stores.** Hype via `EngagementStore.toggleHype`, follows via `FollowStore.toggle`/`ARFollowButton`, user rows via `CreatorCache`. Per-view copies drift. New stores must be reset in `SocialSession.end()`.
 12. **Notifications are written by the database, never the client.** Add a new event as a trigger calling `_notify()` (which applies self, block and dedupe rules), add its copy in `send-push` and `ActivityStore.localCopy`, map it in `NotificationPrefs.allows(type:)`, and render it in `ARActivityView`. Push payloads never carry chat text. Keep `NotificationManager` as the only `UNUserNotificationCenter` delegate, and register categories there in one `setNotificationCategories` call (it replaces the set).
 
+## 6b. 🟢 V2 migration batch — APPLIED 2026-09-28 (all §5.10–§5.28 SQL)
+
+All sixteen pending V2 migrations were applied to prod via Supabase MCP and verified
+(28/28 tables, 29/29 RPCs, 7/7 new triggers, 65 RLS-enabled tables, 5 quests seeded,
+2 active coupons, security advisor shows **no ERROR-level findings**).
+
+**Deviations from the .sql files — the files as written will FAIL if re-run verbatim.
+Fix the files before reusing them:**
+
+1. **`2026_v2_rpc_owner_id.sql` — `SET search_path = public` is wrong.** PostGIS
+   `geometry`/`geography` live in the `extensions` schema, so the function bodies fail
+   with `42704: type "geometry" does not exist`. Applied with
+   `SET search_path = public, extensions`. Also `CREATE OR REPLACE` cannot change a
+   function's return type — the RPCs had to be `DROP`ped first (41 → **42 columns**,
+   `owner_id` appended; `DigitalAsset.ownerId` is optional so decoding is unaffected).
+2. **`2026_v2_stories.sql` — partial index predicate used `now()`**, which isn't
+   IMMUTABLE; Postgres rejects it. Applied `stories_active_idx` without the
+   `WHERE expires_at > now()` clause (RLS/RPCs still filter on expiry).
+3. **`2026_v2_mint_coupons_provenance.sql` required reconciliation.** An earlier draft
+   of this layer was already live with an incompatible shape (`provenance_records` with
+   NOT NULL `seq`/`canonical` and a 2-value `event_type` CHECK; `mint_orders` status CHECK
+   without `'consumed'`). Both tables had 0 rows, so they were dropped and recreated from
+   the canonical file; the draft `on_asset_mint` trigger + `get_provenance` RPC were
+   dropped, and `buy_listing` was reverted to pure settlement (the canonical
+   `trades_provenance_sale` trigger now writes sale provenance).
+4. **plpgsql identifier clashes** renamed while applying: `row` (reserved) →
+   `cur`/`created` in `award_progress` / `create_payment_intent`; `bid_id` → `new_bid`
+   and `trade_id` → `new_trade` in `place_bid` / `settle_auction` (they shadowed the
+   `RETURNING ... INTO` target columns).
+
+**Still true after this batch:** `TESTAPRAM6800621` *and* `LOCOLO100` both preview at
+total $0. `preview_mint_fee` ambiguity is fixed (no more 42702). `app_config.push_enabled`
+remains `false` (local notification fallbacks stay on until `send-push` is deployed).
+The only RLS-enabled table without a policy is `pending_storage_deletes` — intentional
+(service-role only).
+
 ## 7. Remaining work & known gaps
 
 | Priority | Item | Runbook |
 |---|---|---|
-| ✅ | ~~Apply safety & hardening migration~~ (applied 2026-09-28) | §5.3 |
-| ✅ | ~~Apply social migration (comments)~~ (applied 2026-09-28) | §5.3b |
-| ✅ | ~~Apply notifications migration~~ (applied 2026-09-28) | §5.3c step 1 |
-| ✅ | ~~Fix digital_assets_flat SECURITY DEFINER view~~ (applied 2026-09-28) | `2026_ar_flat_view_rls.sql` |
+| ✅ | ~~apply `2026_v2_mint_coupons_provenance.sql`~~ **APPLIED 2026-09-28** | §5.10 |
+| ✅ | ~~apply `2026_v2_stories.sql`~~ **APPLIED** | §5.11 |
+| ✅ | ~~apply `2026_v2_boards.sql`~~ **APPLIED** | §5.12 |
+| ✅ | ~~apply `2026_v2_hashtags.sql`~~ **APPLIED** | §5.13 |
+| ✅ | ~~apply `2026_v2_passport.sql`~~ **APPLIED** | §5.14 |
+| ✅ | ~~apply `2026_v2_reposts.sql`~~ **APPLIED** | §5.15 |
+| ✅ | ~~apply `2026_v2_comment_threads.sql`~~ **APPLIED** | §5.16 |
+| ✅ | ~~apply `2026_v2_quests.sql`~~ **APPLIED** | §5.17 |
+| ✅ | ~~apply `2026_v2_marketplace_phase_b.sql`~~ **APPLIED** | §5.18 |
+| ✅ | ~~apply `2026_v2_marketplace_phase_c.sql`~~ **APPLIED** | §5.19 |
+| ✅ | ~~apply `2026_v2_social_tier23.sql`~~ **APPLIED** | §5.20 |
+| ✅ | ~~apply `2026_v2_marketplace_auctions.sql`~~ **APPLIED** | §5.21 |
+| ✅ | ~~apply `2026_v2_notifications_extra.sql`~~ **APPLIED** | §5.22 |
+| 🟡 | Group chat E2E (scaffold only) | §5.23 |
+| 🟡 | Device QA UX polish pass | §5.24 |
+| 🟠 | Deploy `onramp-session` + `chain-webhook` + `snapshot-portfolio` + updated `send-push` | §5.25 |
+| ✅ | ~~apply `2026_v2_rpc_owner_id.sql`~~ **APPLIED** (RPCs now 42 cols) | §5.26 |
+| ✅ | ~~apply `2026_v2_storage_cleanup.sql`~~ **APPLIED**; still deploy `purge-storage` | §5.27 |
+| ✅ | ~~apply `2026_v2_trigger_types.sql`~~ **APPLIED** | §5.28 |
+| 🟠 | Commit + push all V2 Swift + migrations | §5.2 |
+| 🟠 | Contract audit + partner onramp keys | `LOCOLO_V2_MARKETPLACE.md` / Security |
+| ✅ | Minting Swift + Phase A list/buy/provenance/portfolio UI (code, uncommitted) | §4.10 |
 | 🟠 | APNs key + Push capability + `send-push` + webhook + `push_enabled` | §5.3c steps 2–6 |
-| ✅ | ~~Commit stage 7~~ (done) | §5.2 |
-| 🔴 | Chat identity binding (Firebase custom token) | §5.8 |
-| 🟠 | Deploy edge functions + backfill embeddings | §5.4 |
-| 🟠 | On-device field testing | §5.7 |
+| 🟡 | Chat identity binding — client + edge stub ready; need Firebase SA + Admin mint | §5.8 |
+| 🟠 | Deploy edge functions + backfill embeddings | §5.4 / §5.25 |
+| 🟠 | On-device field testing (AR polish + minting + social) | §5.7 |
 | 🟠 | Moderation process owner | §5.6 |
-| ✅ | ~~Commit prod-only RPC source~~ → `docs/migrations/2026_prod_rpcs_dump.sql` | §5.5 |
-| 🟡 | Storage cleanup job for deleted accounts | §5.9 |
-| 🟡 | Merge `fresh-start` → GitHub `main` | §5.2 |
+| 🟡 | Extend `DigitalAsset` + read RPCs with optional `owner_id` / authenticity fields | §6.1 / §4.10 |
+| 🟡 | Push `fresh-start` → then fast-forward GitHub `main` | §5.2 |
+| 🟡 | Widget Extension target in Xcode (`LocoloWidgets/` sources ready) | polish |
+| ✅ | V1 migrations (safety / social / notifications / flat-view) | §5.3–5.3c |
+| ✅ | V2 Phase A trading DB foundation | `2026_v2_marketplace_phase_a.sql` |
+| ✅ | Prod RPC dump | `2026_prod_rpcs_dump.sql` |
 
-**Engineering-health gaps (audited 2026-09-28, not yet addressed):**
-- 🟠 **No tests at all** — 0 test targets / files across 221 Swift files. Add a unit-test target and cover the money-path logic (trade settlement, escrow, RLS behavior, valuation) BEFORE the V2 marketplace lands. Highest-leverage debt.
-- 🟠 **No crash reporting / product analytics** — Firebase is integrated but Crashlytics + Analytics aren't wired. AR is device-only and unverifiable in CI, so field crash reporting is important. Cheap to add on the existing Firebase.
-- 🟡 **Logging hygiene** — ~301 `print()` calls, no unified logger. Move to `os.Logger`, guard/strip in release, and never log user data / tokens / ciphertext (privacy).
-- 🟡 **Legacy non-AR code still in the build** — `Views/{MainView,CreateView,Discover Screen,ExploreScreen,Posts,…}` still compile though the app is AR-only (WS0 "parking" never done). Move to a `_Parked/` group excluded from the target: less bloat, attack surface, and confusion.
-- 🟡 **No localization** — all strings hardcoded English; add a String Catalog (`.xcstrings`) when targeting non-English markets.
-- Good signals: 0 `try!` force-unwraps; only 13 TODO/FIXME.
+**Engineering-health (audited 2026-09-28, stage 19):**
+- ✅ **Unit tests** — `LocoloTests` target in pbxproj + `MarketplaceMathTests`.
+- ✅ **Crashlytics + Analytics** — SPM products + `LocoloAnalytics` (dSYM upload still owner/CI).
+- ✅ **Logging hygiene (hot AR/mint)** — create/placement/viewer media paths use `LocoloLog`; no precise coords in those logs. Legacy `Views/` `print`s can wait.
+- 🟡 **Legacy non-AR code still in the build** — park closer to release (owner).
+- 🟡 **No localization** — String Catalog when targeting non-English markets.
+- Good signals: 0 `try!` force-unwraps; dead `AssetDetailViewModel` removed.
+- ✅ **Location usage copy** — AR-framed `NSLocation*` strings in pbxproj.
 
-Smaller gaps: push delivery needs §5.3c. Until then alerts are local and only fire while the app is alive, including background location wakes. The client-side fallback aggregation caps at the newest 300 of your assets; no comment likes/threads beyond @mentions; full-text search is client-side (DB `search_tsv` unused); `AssetDetailViewModel` is dead code; 40-entity cap is per placement pass, not a scene total; Collection lists your own creations (no purchase ownership model yet); key rotation makes old messages unreadable (no ratchet / forward secrecy); multiple devices per account = last device's key wins.
+Smaller gaps: push delivery needs §5.3c + deploy updated `send-push`. Until then alerts are local. Full-text search is client-side (`search_tsv` unused); 40-entity cap is per placement pass; Collection ownership improves after §5.26; key rotation / multi-device chat crypto still limited.
 
 ## 8. Environment gotchas
 
@@ -419,6 +646,41 @@ Smaller gaps: push delivery needs §5.3c. Until then alerts are local and only f
 
 ## 9. Changelog (newest first)
 
+- **2026-09-28 (stage 19, uncommitted) — Client ship-ready pass:**
+  - Marketplace: post-trade `get_asset_full` refresh on detail sheet; Phase B `PaymentService.startCheckout` → `onramp-session` from mint paywall.
+  - SQL: `2026_v2_trigger_types.sql` (§5.28) for new trigger CHECK values.
+  - UX: Activity filter chips Social/Sales; AR location usage strings; hot AR/mint `print` → `LocoloLog`.
+  - **Verdict:** no further in-repo client work for ship — owner SQL/deploy/partners/QA only.
+- **2026-09-28 (stage 18, uncommitted) — Docs leftovers complete (client):**
+  - AR: clip→Story (`ARClipRecorder`); triggers gaze / time-of-day / long-press / multi-tap / walk-around; create Preview trigger; draw brushes tube/ribbon/neon; placement contact shadow + true-size; `ExploringLiveActivity` + widget UI source.
+  - Eng: Crashlytics + Analytics SPM in pbxproj; `LocoloAnalytics`; `LocoloTests` XCTest target; `NSSupportsLiveActivities`.
+  - Edge/SQL: `firebase-custom-token` stub; `purge-storage` + `2026_v2_storage_cleanup.sql` (§5.27, wires `delete_my_account`).
+  - Docs: completion plan / polish / status synced — remaining work is owner SQL/deploy/partners/QA.
+- **2026-09-28 (stage 17, uncommitted) — Docs leftovers pass:**
+  - Create: collab picker + poll fields; `HoloCard` on Featured; rare-find haptic/copy; trigger particle burst; payouts read UI; group-chat scaffold sheet.
+  - Edge: `send-push` V2 type map; `snapshot-portfolio` stub; SQL `2026_v2_rpc_owner_id.sql` (§5.26).
+  - Eng: `LocoloLog`, `MarketplaceMath` + `LocoloTests/` sources; deleted dead `AssetDetailViewModel`.
+- **2026-09-28 (stage 16, uncommitted) — V2 remainder: reposts, threads, quests, Phase B/C foundations:**
+  - **SQL (CLAUDE apply §5.15–§5.19):** `2026_v2_reposts.sql`, `2026_v2_comment_threads.sql`, `2026_v2_quests.sql`, `2026_v2_marketplace_phase_b.sql`, `2026_v2_marketplace_phase_c.sql`.
+  - **Social:** `RepostStore` + Re-drop on feed cards; threaded replies + comment likes; weekly quests on Passport card.
+  - **Marketplace:** `PaymentService` + paid-mint intent; `WalletService` + Settings wallet link; nft_tokens / Seaport column schema.
+- **2026-09-28 (stage 15, uncommitted) — Phase D Passport sync + leaderboard:**
+  - **SQL in repo:** `2026_v2_passport.sql` — `user_progress`, `award_progress`, `get_xp_leaderboard`. **Apply (§5.14).**
+  - **Client:** `ProgressStore` (discover/create/daily_open); Profile → XP Leaderboard; local Passport card unchanged as fallback.
+- **2026-09-28 (stage 14, uncommitted) — Phase D hashtags:**
+  - **SQL in repo:** `2026_v2_hashtags.sql`. **Apply to prod (§5.13).**
+  - **Client:** `TagStore`; Create tags field; Search trending tags + `#slug` results; detail sheet tag chips.
+- **2026-09-28 (stage 13, uncommitted) — Phase D boards:**
+  - **SQL in repo:** `2026_v2_boards.sql` — `boards` / `board_items`, `get_user_boards`, `get_board_item_ids`. **Apply to prod (§5.12).**
+  - **Client:** `BoardsStore` in `SocialSession`; `BoardsListView` / `BoardDetailView` / `SaveToBoardSheet`; Creator Studio → Boards; asset "…" → Save to board.
+- **2026-09-28 (stage 12, uncommitted) — Phase D Tier 1: stories + immersive For You feed:**
+  - **SQL in repo:** `2026_v2_stories.sql` — `stories` / `story_views`, `get_story_rail`, `mark_story_viewed`. **Apply to prod (§5.11).** Client hides the rail until applied.
+  - **Client:** `StoryStore` in `SocialSession`; `StoryRailView` + `StoryViewer` on Explore; `ImmersiveFeedView` full-screen vertical pager (Swipe toggle on Shared Space). Hype/comments/wishlist via shared stores.
+- **2026-09-28 (stage 11, uncommitted, build green) — minting + Phase A marketplace client:**
+  - **SQL in repo:** `2026_v2_mint_coupons_provenance.sql` — coupons (`discount_type`/`discount_value`), mint_orders, provenance_records, fixed `preview_mint_fee`, `create_mint_order`, `attach_mint_order`, mint+sale provenance triggers, seeds `LOCOLO100`. Locally tested. **Apply to prod (§5.10).**
+  - **Mint client:** Ed25519 signing, content hash, mint paywall + coupon, attach order after insert.
+  - **Marketplace client:** `MarketplaceRepository` / `MarketplaceSheet` (list, cancel, buy via `buy_listing`), provenance timeline, portfolio snapshots chart on Creator Studio, optional `DigitalAsset.ownerId`.
+- **2026-09-28 — V2 Phase A trading DB** committed as `626b940`.
 - **2026-09-28 (stage 10) — share AR asset in chat (Instagram-style) + AR polish backlog:** new `AssetShareService` (find-or-create conversation → send `locolo://asset/<id>` through the normal E2E send path — no new crypto/schema). `ChatView` detects an asset-link message and renders a tappable rich `AssetShareBubble` (async-loads via `get_asset_full`, opens the detail sheet); `AssetDetailSheet` "…" menu gains **Send in a message** → reuses `ARNewMessageSheet` people-picker → toast on send. Build green. Also added `docs/LOCOLO_AR_POLISH.md` (prioritized AR enhancement backlog).
 - **2026-09-28 (stage 9) — DB migrations applied to prod:** ran `2026_ar_safety_and_hardening.sql`, `2026_ar_social.sql`, `2026_ar_notifications.sql` via MCP, plus `2026_ar_flat_view_rls.sql` (new). RLS now on for all 26 public tables (86 policies); the critical anon email/hype exposure is closed; read RPCs are SECURITY INVOKER; comments + the notifications backend (triggers, prefs, device tokens, cross-device read state) are live with `push_enabled=false`. Verified via security advisor: the RLS-disabled critical is gone and the SECURITY DEFINER view ERROR is fixed.
   - **Residual advisor findings (reviewed, non-blocking):** (a) 34 legacy functions have a mutable `search_path` (WARN — the AR functions added here all pin `search_path=public`; the rest are pre-existing loop/place helpers); (b) `pg_trgm`/`vector` live in the `public` schema (WARN, cosmetic); (c) GraphQL "table visible to anon/authenticated" lints — informational, RLS still gates every row; (d) a few SECURITY DEFINER RPCs are callable by anon/authenticated by design (`email_registered` needs anon for the forgot-password check; `toggle_asset_hype`/`notify_message`/`register_device_token` self-authorize via `auth.uid()`); (e) leaked-password protection is a dashboard Auth toggle (enable in Supabase → Auth → Passwords). None block launch.

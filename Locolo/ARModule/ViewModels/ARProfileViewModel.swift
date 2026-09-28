@@ -18,12 +18,14 @@ final class ARProfileViewModel: ObservableObject {
     /// Last-seen date per explored asset (Explorer Passport streaks).
     @Published var exploredDates: [Date] = []
     @Published var offersByAsset: [UUID: [Offer]] = [:]
+    @Published var portfolioSnapshots: [PortfolioSnapshot] = []
     @Published var isLoading = false
     @Published var isLoadingOffers = false
     @Published var errorMessage: String?
 
     private let client = SupabaseManager.shared.client
     private let assetRepo = DigitalAssetRepository()
+    private let marketplaceRepo = MarketplaceRepository.shared
 
     // MARK: - Overview stats
 
@@ -45,9 +47,13 @@ final class ARProfileViewModel: ObservableObject {
         allOffers.filter { $0.status == "accepted" }.reduce(0) { $0 + $1.price }
     }
 
-    /// Sum of listed values across the portfolio.
+    /// Latest portfolio snapshot when available; otherwise sum of listed
+    /// values on your creations (until holdings-by-owner fully replaces it).
     var portfolioValue: Double {
-        ownAssets.reduce(0) { $0 + ($1.currentValue ?? 0) }
+        if let latest = portfolioSnapshots.max(by: { $0.day < $1.day }) {
+            return latest.totalValue
+        }
+        return ownAssets.reduce(0) { $0 + ($1.currentValue ?? 0) }
     }
 
     var highestOpenOffer: Double? {
@@ -133,6 +139,7 @@ final class ARProfileViewModel: ObservableObject {
         isLoading = false
 
         await loadOffers()
+        await loadPortfolioSnapshots(userId: userId)
     }
 
     /// Fetch offers for every asset that accepts them, concurrently.
@@ -160,5 +167,32 @@ final class ARProfileViewModel: ObservableObject {
 
         offersByAsset = result
         isLoadingOffers = false
+    }
+
+    private func loadPortfolioSnapshots(userId: UUID) async {
+        var snapshots = (try? await marketplaceRepo.portfolioSnapshots(for: userId, limit: 90)) ?? []
+
+        if snapshots.isEmpty {
+            if let holdings = try? await fetchHoldings(userId: userId) {
+                let total = holdings.reduce(0) { $0 + ($1.currentValue ?? 0) }
+                try? await marketplaceRepo.recordPortfolioSnapshot(
+                    userId: userId,
+                    total: total,
+                    holdings: holdings.count
+                )
+                snapshots = (try? await marketplaceRepo.portfolioSnapshots(for: userId, limit: 90)) ?? []
+            }
+        }
+
+        portfolioSnapshots = snapshots
+    }
+
+    private func fetchHoldings(userId: UUID) async throws -> [DigitalAsset] {
+        try await client
+            .from("digital_assets")
+            .select("*")
+            .eq("owner_id", value: userId)
+            .execute()
+            .value
     }
 }

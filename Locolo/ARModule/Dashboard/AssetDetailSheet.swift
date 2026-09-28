@@ -13,18 +13,23 @@ import CoreLocation
 
 
 struct AssetDetailSheet: View {
-    let asset: DigitalAsset
+    /// Mutable so post-buy / list / cancel can refresh ownership & sale flags.
+    @State private var asset: DigitalAsset
     /// Open the creator's public profile (WS4). The sheet can't push the nav
     /// stack itself, so the presenter passes a closure that dismisses + pushes.
     var onOpenCreator: (() -> Void)? = nil
     /// Open any user's profile (comment authors). Same dismiss + push contract.
     var onOpenProfile: ((UUID) -> Void)? = nil
+    /// After dismissing, open Create with this asset as remix parent.
+    var onRemix: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var userVM: UserViewModel
     @EnvironmentObject var wishlistVM: WishlistViewModel
     @ObservedObject private var engagement = EngagementStore.shared
     @ObservedObject private var creators = CreatorCache.shared
+    @ObservedObject private var polls = PollStore.shared
+    @ObservedObject private var remixes = RemixStore.shared
 
     // I just override the whole colour scheme.
     // I tried mixing light/dark earlier and it looked ugly + too bright.
@@ -33,6 +38,20 @@ struct AssetDetailSheet: View {
     @State private var showARView = false
     @State private var showOffers = false
     @State private var showCreateOffer = false
+    @State private var showMarketplace = false
+    @State private var activeListing: AssetListing?
+
+    init(
+        asset: DigitalAsset,
+        onOpenCreator: (() -> Void)? = nil,
+        onOpenProfile: ((UUID) -> Void)? = nil,
+        onRemix: (() -> Void)? = nil
+    ) {
+        _asset = State(initialValue: asset)
+        self.onOpenCreator = onOpenCreator
+        self.onOpenProfile = onOpenProfile
+        self.onRemix = onRemix
+    }
     @State private var distanceText: String = "--"
     @State private var distanceMeters: Double?
     @State private var isAboutExpanded: Bool = false
@@ -42,7 +61,9 @@ struct AssetDetailSheet: View {
     @State private var confirmBlock = false
     @State private var showComments = false
     @State private var showSendToChat = false
+    @State private var showSaveToBoard = false
     @State private var shareToast: String?
+    @State private var assetTags: [TagItem] = []
 
     private var isHyped: Bool { engagement.isHyped(asset.id) }
     private var hypeCount: Int { engagement.hypeCount(for: asset) }
@@ -122,6 +143,10 @@ struct AssetDetailSheet: View {
             }
             // Instagram-style "send this asset in a message" — pick a person,
             // the asset is delivered as an E2E-encrypted rich card.
+            .sheet(isPresented: $showSaveToBoard) {
+                SaveToBoardSheet(asset: asset)
+                    .presentationDetents([.medium, .large])
+            }
             .sheet(isPresented: $showSendToChat) {
                 ARNewMessageSheet { creator in
                     guard let me = userVM.currentUser else { return }
@@ -158,7 +183,16 @@ struct AssetDetailSheet: View {
             .task {
                 async let engagementPrime: Void = engagement.prime([asset])
                 async let creatorLoad: Void = creators.load([asset.userId])
-                _ = await (engagementPrime, creatorLoad)
+                async let listingLoad: Void = loadActiveListing()
+                async let reactions: Void = ReactionStore.shared.prime([asset])
+                async let poll: Void = polls.load(for: asset.id)
+                async let remixParent: UUID? = remixes.loadParent(of: asset.id)
+                _ = await (engagementPrime, creatorLoad, listingLoad, reactions, poll, remixParent)
+            }
+            .sheet(isPresented: $showMarketplace) {
+                MarketplaceSheet(asset: asset) {
+                    Task { await refreshAfterTrade() }
+                }
             }
         }
     }
@@ -167,8 +201,20 @@ struct AssetDetailSheet: View {
 extension AssetDetailSheet {
     
     // I check if the asset belongs to current user
+    private var effectiveOwnerId: UUID { asset.effectiveOwnerId }
+
     private var isCurrentUserOwner: Bool {
-        userVM.currentUser?.id == asset.userId
+        userVM.currentUser?.id == effectiveOwnerId
+    }
+
+    private var marketplaceButtonTitle: String {
+        if let listing = activeListing {
+            if isCurrentUserOwner {
+                return "Listed · \(currency(listing.price))"
+            }
+            return "Buy · \(currency(listing.price))"
+        }
+        return "Marketplace"
     }
     
     // AR button only appears if you're close to the asset
@@ -401,6 +447,36 @@ extension AssetDetailSheet {
                         .foregroundColor(.white)
                 }
             }
+            if !assetTags.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(assetTags) { tag in
+                            Text("#\(tag.slug)")
+                                .font(.caption2.weight(.bold))
+                                .foregroundColor(.white.opacity(0.9))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(Color.white.opacity(0.12)))
+                        }
+                    }
+                }
+                .padding(.top, 6)
+            }
+            if remixes.parentOf[asset.id] != nil {
+                Label("Remixed from another drop", systemImage: "wand.and.stars")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(.white.opacity(0.7))
+                    .padding(.top, 4)
+            }
+            ReactionBarView(assetId: asset.id, compact: true)
+                .padding(.top, 8)
+            if let poll = polls.pollsByAsset[asset.id] {
+                AssetPollCard(poll: poll)
+                    .padding(.top, 8)
+            }
+        }
+        .task {
+            assetTags = await TagStore.shared.tags(for: asset.id)
         }
     }
     
@@ -423,8 +499,9 @@ extension AssetDetailSheet {
     private var buttonSection: some View {
         VStack(spacing: 12) {
 
-            // Buy Now removed for v1 — payments are out of scope; offers stay
-            // as the non-transactional marketplace path.
+            Button { showMarketplace = true } label: {
+                MatteOfferButton(title: marketplaceButtonTitle)
+            }
 
             // OFFERS
             if asset.acceptsOffers == true {
@@ -435,7 +512,7 @@ extension AssetDetailSheet {
                         MatteOfferButton(title: "View Offers")
                     }
                     .sheet(isPresented: $showOffers) {
-                        OfferListView(assetId: asset.id, ownerId: asset.userId)
+                        OfferListView(assetId: asset.id, ownerId: effectiveOwnerId)
                     }
                     
                 } else {
@@ -494,6 +571,20 @@ extension AssetDetailSheet {
             } label: {
                 Label("Send in a message", systemImage: "paperplane")
             }
+            Button {
+                showSaveToBoard = true
+            } label: {
+                Label("Save to board", systemImage: "square.stack.3d.up")
+            }
+            if RemixStore.shared.available {
+                Button {
+                    RemixStore.shared.beginRemix(of: asset)
+                    onRemix?()
+                    dismiss()
+                } label: {
+                    Label("Remix this", systemImage: "wand.and.stars")
+                }
+            }
             ShareLink(
                 item: DeepLinkRouter.assetURL(for: asset.id),
                 subject: Text(asset.name ?? "AR asset on Locolo"),
@@ -503,6 +594,16 @@ extension AssetDetailSheet {
             }
             if !isCurrentUserOwner {
                 Divider()
+                if SafetyExtrasStore.shared.available {
+                    Button {
+                        Task { await SafetyExtrasStore.shared.toggleMute(asset.userId) }
+                    } label: {
+                        Label(
+                            SafetyExtrasStore.shared.isMuted(asset.userId) ? "Unmute creator" : "Mute creator",
+                            systemImage: "bell.slash"
+                        )
+                    }
+                }
                 Button {
                     showReport = true
                 } label: {
@@ -547,6 +648,25 @@ extension AssetDetailSheet {
         } else if id == asset.userId {
             openCreator()
         }
+    }
+
+    private func currency(_ value: Double) -> String {
+        String(format: "$%.0f", value)
+    }
+
+    private func loadActiveListing() async {
+        activeListing = try? await MarketplaceRepository.shared.activeListing(for: asset.id)
+    }
+
+    /// After buy / list / cancel / bid settle — refresh listing + asset row
+    /// so owner_id / is_for_sale / price reflect the trade.
+    private func refreshAfterTrade() async {
+        async let listing: Void = loadActiveListing()
+        if let fresh = await DigitalAssetRepository().fetchAsset(id: asset.id) {
+            asset = fresh
+            await engagement.prime([fresh])
+        }
+        _ = await listing
     }
 
     private func toggleWishlist() {

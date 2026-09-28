@@ -85,6 +85,47 @@ struct ARCreatorDashboardView: View {
                 } else {
                     ExplorerPassportCard(passport: passport)
                         .padding(.horizontal, 16)
+                    Button {
+                        dashboardState.path.append(.leaderboard)
+                    } label: {
+                        HStack {
+                            Label("XP Leaderboard", systemImage: "trophy.fill")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if let xp = ProgressStore.shared.progress?.xp {
+                                AnimatedCounter(value: xp, font: .caption.weight(.bold).monospacedDigit())
+                                    .foregroundColor(.secondary)
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(14)
+                        .arGlassCard(cornerRadius: 16)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    Button {
+                        dashboardState.path.append(.events)
+                    } label: {
+                        HStack {
+                            Label("AR Events", systemImage: "calendar")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if EventsStore.shared.available {
+                                Text("\(EventsStore.shared.upcoming.count)")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundColor(.secondary)
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(14)
+                        .arGlassCard(cornerRadius: 16)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
                     overviewSection
                     if !vm.ownAssets.isEmpty {
                         analyticsSection
@@ -414,6 +455,9 @@ struct ARCreatorDashboardView: View {
             )
             .padding(.horizontal, 16)
 
+            portfolioChart
+                .padding(.horizontal, 16)
+
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 ARStatTile(value: currency(vm.portfolioValue), label: "Portfolio Value",
                            icon: "chart.pie.fill")
@@ -425,6 +469,9 @@ struct ARCreatorDashboardView: View {
                            icon: "arrow.up.right.circle.fill", tint: Color(hex: "0891B2"))
             }
             .padding(.horizontal, 16)
+
+            PayoutsCard()
+                .padding(.horizontal, 16)
 
             if let top = vm.topAsset {
                 topPerformerCard(top)
@@ -523,6 +570,55 @@ struct ARCreatorDashboardView: View {
         value == 0 ? "$0" : String(format: "$%.0f", value)
     }
 
+    private var portfolioChart: some View {
+        chartCard(title: "Portfolio value over time") {
+            if vm.portfolioSnapshots.count < 2 {
+                Text("List or sell creations to build your portfolio history.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+            } else {
+                Chart(vm.portfolioSnapshots, id: \.id) { snapshot in
+                    if let day = snapshot.dayDate {
+                        AreaMark(
+                            x: .value("Day", day, unit: .day),
+                            y: .value("Value", snapshot.totalValue)
+                        )
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [ARDesign.accent.opacity(0.32), ARDesign.accent.opacity(0.02)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .interpolationMethod(.monotone)
+
+                        LineMark(
+                            x: .value("Day", day, unit: .day),
+                            y: .value("Value", snapshot.totalValue)
+                        )
+                        .foregroundStyle(ARDesign.accent)
+                        .lineStyle(StrokeStyle(lineWidth: 2))
+                        .interpolationMethod(.monotone)
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .trailing) { _ in
+                        AxisGridLine().foregroundStyle(ARDesign.hairline)
+                        AxisValueLabel().font(.caption2)
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .day, count: max(1, vm.portfolioSnapshots.count / 5))) { _ in
+                        AxisValueLabel(format: .dateTime.month(.abbreviated).day(), collisionResolution: .greedy)
+                            .font(.caption2)
+                    }
+                }
+                .frame(height: 160)
+            }
+        }
+    }
+
     // MARK: - Library
 
     private var librarySection: some View {
@@ -544,6 +640,7 @@ struct ARCreatorDashboardView: View {
 
             VStack(spacing: 10) {
                 libraryLink(title: "My Collection", icon: "bag.fill", route: .collection)
+                libraryLink(title: "Boards", icon: "square.stack.3d.up.fill", route: .boards)
                 libraryLink(title: "Wishlist", icon: "heart.fill", route: .wishlist)
             }
             .padding(.horizontal, 16)

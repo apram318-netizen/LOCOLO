@@ -581,7 +581,10 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         let cameraPosition = SIMD3<Float>(transform.columns.3.x,
                                           transform.columns.3.y,
                                           transform.columns.3.z)
-        triggerEngine.updateProximity(cameraPosition: cameraPosition)
+        let forward = -SIMD3<Float>(transform.columns.2.x,
+                                    transform.columns.2.y,
+                                    transform.columns.2.z)
+        triggerEngine.updateProximity(cameraPosition: cameraPosition, cameraForward: forward)
     }
 
 
@@ -674,7 +677,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         guard let arView = arView else { return }
 
         #if targetEnvironment(simulator)
-        print("Simulator skip: AR placement is device-only")
+        LocoloLog.debug(LocoloLog.ar, "simulator skip: AR placement")
         return
         #else
         // Place the nearest assets first and cap the total so memory stays
@@ -791,7 +794,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
 
         let distance = originGround.distance(from: assetGround) // horizontal meters
         guard distance <= maxWorldPlacementMeters else {
-            print("Skipping \(asset.name ?? "asset"): \(Int(distance)) m out of range")
+            LocoloLog.debug(LocoloLog.ar, "skip asset out of range")
             return nil
         }
 
@@ -859,7 +862,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
                 request
                     .sink(receiveCompletion: { completion in
                         if case let .failure(error) = completion {
-                            print("Load error", error)
+                            LocoloLog.ar.error("model load error: \(error.localizedDescription, privacy: .public)")
                         }
                     }, receiveValue: { [weak self] entity in
                         guard let self else { return }
@@ -869,7 +872,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
                     .store(in: &self.modelLoadTokens)   // survives a geo→world switch (WS3.7)
 
             } catch {
-                print("Model download/load error:", error)
+                LocoloLog.ar.error("model download/load: \(error.localizedDescription, privacy: .public)")
                 self.placedIds.remove(asset.id)
             }
         }
@@ -1024,7 +1027,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
     /// - Description: Places a test geo anchor at a coordinate.
     func placeGeoAnchorIfSupported(_ coordinate: CLLocationCoordinate2D) async {
         #if targetEnvironment(simulator)
-        print("Simulator skip")
+        LocoloLog.debug(LocoloLog.ar, "simulator skip")
         return
         #else
         do {
@@ -1032,7 +1035,7 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
             let entity = AnchorEntity(anchor: anchor)
             arView?.scene.addAnchor(entity)
         } catch {
-            print("Geo anchor error", error)
+            LocoloLog.ar.error("geo anchor error: \(error.localizedDescription, privacy: .public)")
         }
         #endif
     }

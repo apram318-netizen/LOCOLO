@@ -41,13 +41,28 @@ const PREF_FOR_TYPE: Record<string, string> = {
   follow: "follows",
   hype: "hypes",
   comment: "comments",
+  comment_reply: "comments",
+  comment_like: "hypes",
   mention: "mentions",
   offer: "offers",
   offer_status: "offers",
+  outbid: "offers",
   message: "messages",
   new_post: "new_posts",
   discovery: "milestones",
   milestone: "milestones",
+  // V2 (§5.22) — columns added by 2026_v2_notifications_extra.sql
+  reaction: "reactions",
+  repost: "reposts",
+  collect: "reposts",
+  remix: "reposts",
+  tag: "reposts",
+  story_view: "reposts",
+  sale: "sales",
+  royalty: "sales",
+  quest_complete: "quests",
+  level_up: "quests",
+  event_reminder: "events",
 };
 
 Deno.serve(async (req) => {
@@ -233,6 +248,45 @@ function compose(n: NotificationRow, actor: Person, asset: Asset): Composed {
         : { title: `🔥 ${art} hit ${count} hypes`, body: "Keep creating — people love this one.",
             url: assetUrl, thread: "milestones" };
     }
+    case "repost":
+      return { title: `🔁 ${who} reposted ${art}`, body: "Your drop is traveling.", url: assetUrl,
+               thread: `asset-${n.asset_id}` };
+    case "collect":
+      return { title: `📌 ${who} saved ${art}`, body: "Added to a board.", url: assetUrl,
+               thread: `asset-${n.asset_id}` };
+    case "reaction": {
+      const emoji = (n.body ?? "").trim() || "✨";
+      return { title: `${emoji} ${who} reacted to ${art}`, body: "Someone felt that.", url: assetUrl,
+               thread: `asset-${n.asset_id}` };
+    }
+    case "remix":
+    case "tag":
+      return { title: `🎨 ${who} remixed ${art}`, body: "A new take just dropped.", url: assetUrl,
+               thread: `asset-${n.asset_id}` };
+    case "quest_complete":
+      return { title: "🏆 Quest complete", body: "You crushed a weekly quest.", url: "locolo://activity",
+               thread: "quests" };
+    case "level_up":
+      return { title: "⬆️ Level up!", body: "Your Passport leveled up.", url: "locolo://activity",
+               thread: "quests" };
+    case "sale":
+    case "royalty":
+      return { title: "💸 Sale!", body: `${who} bought ${art}.`, url: assetUrl, thread: "sales" };
+    case "outbid":
+      return { title: "📉 You were outbid", body: `Someone raised the bid on ${art}.`, url: assetUrl,
+               thread: "offers" };
+    case "event_reminder":
+      return { title: "📅 Event soon", body: "An AR meetup is starting soon.", url: "locolo://activity",
+               thread: "events" };
+    case "story_view":
+      return { title: `👁 ${who} viewed your story`, subtitle: handle, body: "Tap to see who's watching.",
+               url: userUrl, thread: "stories" };
+    case "comment_reply":
+      return { title: `${who} replied on ${art}`, body: quote(n.body), url: assetUrl,
+               thread: `asset-${n.asset_id}` };
+    case "comment_like":
+      return { title: `⚡ ${who} liked your comment`, body: "Your reply is getting love.", url: assetUrl,
+               thread: `asset-${n.asset_id}` };
     default:
       return { title: "Locolo", body: "You have new activity.", url: "locolo://activity", thread: "activity" };
   }

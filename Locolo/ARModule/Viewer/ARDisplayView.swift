@@ -19,6 +19,8 @@ struct ARDisplayView: View {
 
     @State private var snapshot: SnapshotItem?
     @State private var isCapturing = false
+    @State private var isRecordingClip = false
+    @State private var clipToast: String?
     @State private var flash = false
 
     private struct SnapshotItem: Identifiable {
@@ -50,7 +52,7 @@ struct ARDisplayView: View {
                     .transition(.scale.combined(with: .opacity))
             }
 
-            // MARK: - Snapshot shutter
+            // MARK: - Snapshot shutter (+ long-press AR clip → Story)
             if vm.isLocalized {
                 VStack {
                     Spacer()
@@ -59,8 +61,10 @@ struct ARDisplayView: View {
                         Button(action: takeSnapshot) {
                             ZStack {
                                 Circle().fill(.ultraThinMaterial)
-                                Circle().strokeBorder(Color.white, lineWidth: 3).padding(5)
-                                if isCapturing {
+                                Circle().strokeBorder(
+                                    isRecordingClip ? Color.red : Color.white, lineWidth: 3
+                                ).padding(5)
+                                if isCapturing || isRecordingClip {
                                     ProgressView().tint(.white)
                                 } else {
                                     Image(systemName: "camera.fill")
@@ -70,12 +74,30 @@ struct ARDisplayView: View {
                             }
                             .frame(width: 64, height: 64)
                         }
-                        .disabled(isCapturing)
-                        .accessibilityLabel("Take AR snapshot")
+                        .disabled(isCapturing || isRecordingClip)
+                        .simultaneousGesture(
+                            LongPressGesture(minimumDuration: 0.55).onEnded { _ in
+                                Task { await recordClipToStory() }
+                            }
+                        )
+                        .accessibilityLabel("Take AR snapshot. Long-press to record a clip for Story.")
                         .padding(.trailing, 20)
                         .padding(.bottom, 116)
                     }
                 }
+            }
+
+            if let clipToast {
+                VStack {
+                    Spacer()
+                    Text(clipToast)
+                        .font(.caption.weight(.bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(Capsule().fill(.black.opacity(0.75)))
+                        .padding(.bottom, 200)
+                }
+                .transition(.opacity)
             }
 
             if flash {
@@ -174,18 +196,23 @@ struct ARDisplayView: View {
                 }
             }
 
-            // MARK: - Trigger flash caption
+            // MARK: - Trigger flash caption + particle burst
             if let flash = vm.triggerFlash {
                 VStack {
                     Spacer()
-                    Text(flash)
-                        .font(.callout.weight(.bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 18).padding(.vertical, 10)
-                        .background(Capsule().fill(AppColors.purplePinkGradient))
-                        .shadow(color: .purple.opacity(0.5), radius: 12)
-                        .padding(.bottom, 160)
-                        .transition(.scale.combined(with: .opacity))
+                    ZStack {
+                        CelebrationBurst(symbol: "sparkles",
+                                         colors: [.yellow, .orange, .pink, .cyan])
+                            .frame(height: 90)
+                        Text(flash)
+                            .font(.callout.weight(.bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 18).padding(.vertical, 10)
+                            .background(Capsule().fill(AppColors.purplePinkGradient))
+                            .shadow(color: .purple.opacity(0.5), radius: 12)
+                    }
+                    .padding(.bottom, 160)
+                    .transition(.scale.combined(with: .opacity))
                 }
                 .animation(.spring(response: 0.4, dampingFraction: 0.7), value: vm.triggerFlash)
             }
@@ -268,11 +295,17 @@ struct ARDisplayView: View {
             vm.startLocationUpdates()
             ProximityNotifier.shared.isViewerActive = true
         }
+        .onAppear {
+            refreshLiveActivity()
+        }
         // Release the mic and motion sensors when leaving the AR session
         .onDisappear {
             vm.triggerEngine.teardown()
             ProximityNotifier.shared.isViewerActive = false
+            ExploringLiveActivity.end()
         }
+        .onChange(of: vm.nearbyAssets.count) { _, _ in refreshLiveActivity() }
+        .onChange(of: vm.finderTarget?.asset.id) { _, _ in refreshLiveActivity() }
         .task { await vm.runFinderPulses() }
         .animation(.spring(response: 0.45, dampingFraction: 0.75), value: vm.justFound?.id)
         .sheet(item: $snapshot) { item in
@@ -281,7 +314,7 @@ struct ARDisplayView: View {
     }
 
     private func takeSnapshot() {
-        guard !isCapturing else { return }
+        guard !isCapturing, !isRecordingClip else { return }
         isCapturing = true
         ARHaptics.tick()
         withAnimation(.easeOut(duration: 0.08)) { flash = true }
@@ -291,6 +324,44 @@ struct ARDisplayView: View {
             guard let raw = await vm.captureSnapshot() else { return }
             snapshot = SnapshotItem(image: ARSnapshotRenderer.render(raw, caption: snapshotCaption))
         }
+    }
+
+    private func recordClipToStory() async {
+        guard !isRecordingClip, ARClipRecorder.shared.isAvailable else {
+            clipToast = "Clip recording needs a real device"
+            return
+        }
+        isRecordingClip = true
+        clipToast = "Recording…"
+        ARHaptics.tick()
+        defer { isRecordingClip = false }
+        guard let data = await ARClipRecorder.shared.recordClip(seconds: 5) else {
+            clipToast = "Couldn't record clip"
+            return
+        }
+        do {
+            _ = try await StoryStore.shared.postVideo(
+                mp4Data: data,
+                caption: snapshotCaption.map { "AR clip \($0)" },
+                assetId: vm.finderTarget?.asset.id ?? vm.justFound?.id)
+            LocoloAnalytics.storyPosted(video: true)
+            ARHaptics.success()
+            clipToast = "Clip posted to Story"
+        } catch {
+            clipToast = "Story unavailable"
+        }
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        clipToast = nil
+    }
+
+    private func refreshLiveActivity() {
+        guard vm.isLocalized else { return }
+        let nearest = vm.finderTarget
+        ExploringLiveActivity.start(
+            nearbyCount: vm.nearbyAssets.count,
+            nearestName: nearest?.asset.name,
+            nearestMeters: nearest?.distance
+        )
     }
 
     /// Names the nearest asset in view range, e.g. "with Neon Koi".
@@ -371,33 +442,89 @@ struct ARFinderChip: View {
 struct ARFoundBanner: View {
     let asset: DigitalAsset
 
+    @State private var celebrate = true
+    @State private var sharingToStory = false
+    @State private var storyToast: String?
+
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Image(systemName: "sparkles")
                 .font(.system(size: 34, weight: .bold))
                 .foregroundStyle(LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom))
-            Text("You found it!")
+            Text(asset.isRareFind ? "Rare find!" : "You found it!")
                 .font(.title3.bold())
             Text(asset.name ?? "A hidden asset")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-            Text("+1 discovery in your Passport")
+            Text(asset.isRareFind
+                 ? "Listed drop · bigger passport flex"
+                 : "+1 discovery in your Passport")
                 .font(.caption.weight(.semibold))
                 .foregroundColor(.purple)
+
+            if StoryStore.shared.available {
+                Button {
+                    Task { await shareToStory() }
+                } label: {
+                    Group {
+                        if sharingToStory {
+                            ProgressView().tint(.white)
+                        } else {
+                            Label("Share to Story", systemImage: "circle.dashed")
+                                .font(.caption.weight(.bold))
+                        }
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(AppColors.purplePinkGradient))
+                }
+                .disabled(sharingToStory)
+            }
+
+            if let storyToast {
+                Text(storyToast)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 20)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .celebration(trigger: $celebrate, symbol: "sparkles")
         .accessibilityElement(children: .combine)
+    }
+
+    private func shareToStory() async {
+        sharingToStory = true
+        defer { sharingToStory = false }
+        guard let url = asset.thumbUrl.flatMap(URL.init(string:)),
+              let (data, _) = try? await URLSession.shared.data(from: url) else {
+            storyToast = "Couldn't load a snapshot for your story."
+            return
+        }
+        do {
+            _ = try await StoryStore.shared.post(
+                imageData: data,
+                caption: "Found \(asset.name ?? "this") in AR ✨",
+                assetId: asset.id)
+            ARHaptics.success()
+            storyToast = "Posted to your story"
+        } catch {
+            storyToast = "Story unavailable right now"
+        }
     }
 }
 
 // MARK: - Snapshot preview
 struct ARSnapshotPreview: View {
     let image: UIImage
+    var linkedAssetId: UUID? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var showShare = false
     @State private var saved = false
+    @State private var storyPosted = false
+    @State private var postingStory = false
 
     var body: some View {
         NavigationStack {
@@ -436,6 +563,27 @@ struct ARSnapshotPreview: View {
                     }
                 }
                 .padding(.horizontal, 20)
+
+                if StoryStore.shared.available {
+                    Button {
+                        Task { await addToStory() }
+                    } label: {
+                        Group {
+                            if postingStory {
+                                ProgressView()
+                            } else {
+                                Label(storyPosted ? "On your story" : "Add to Story",
+                                      systemImage: storyPosted ? "checkmark" : "circle.dashed")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial, in: Capsule())
+                    }
+                    .disabled(postingStory || storyPosted)
+                    .padding(.horizontal, 20)
+                }
             }
             .frame(maxHeight: .infinity)
             .background(ARDesign.screenBackground.ignoresSafeArea())
@@ -450,6 +598,20 @@ struct ARSnapshotPreview: View {
                 ShareSheet(items: [image])
                     .presentationDetents([.medium, .large])
             }
+        }
+    }
+
+    private func addToStory() async {
+        postingStory = true
+        defer { postingStory = false }
+        guard let data = image.jpegData(compressionQuality: 0.85) else { return }
+        do {
+            _ = try await StoryStore.shared.post(
+                imageData: data, caption: nil, assetId: linkedAssetId)
+            storyPosted = true
+            ARHaptics.success()
+        } catch {
+            ARHaptics.warning()
         }
     }
 }
@@ -470,10 +632,20 @@ struct ARViewContainer: UIViewRepresentable {
         if let old = SharedARViewHolder.triggerTapRecognizer {
             view.removeGestureRecognizer(old)
         }
+        if let old = SharedARViewHolder.triggerLongPressRecognizer {
+            view.removeGestureRecognizer(old)
+        }
         let tap = UITapGestureRecognizer(target: context.coordinator,
                                          action: #selector(Coordinator.handleTap(_:)))
         view.addGestureRecognizer(tap)
         SharedARViewHolder.triggerTapRecognizer = tap
+
+        let longPress = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleLongPress(_:)))
+        longPress.minimumPressDuration = 0.55
+        view.addGestureRecognizer(longPress)
+        SharedARViewHolder.triggerLongPressRecognizer = longPress
 
         // Coaching overlay guides world-tracking initialization and auto-hides
         // once tracking is normal. Reuse one instance across visits. (WS3)
@@ -517,6 +689,14 @@ struct ARViewContainer: UIViewRepresentable {
             let point = gesture.location(in: arView)
             if let entity = arView.entity(at: point) {
                 vm.triggerEngine.handleTap(on: entity)
+            }
+        }
+
+        @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began, let arView = vm.arView else { return }
+            let point = gesture.location(in: arView)
+            if let entity = arView.entity(at: point) {
+                vm.triggerEngine.handleLongPress(on: entity)
             }
         }
     }
@@ -636,5 +816,6 @@ final class SharedARViewHolder {
         return view
     }()
     static var triggerTapRecognizer: UITapGestureRecognizer?
+    static var triggerLongPressRecognizer: UILongPressGestureRecognizer?
     static var coachingOverlay: ARCoachingOverlayView?
 }

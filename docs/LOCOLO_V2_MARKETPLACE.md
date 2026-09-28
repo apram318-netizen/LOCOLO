@@ -2,6 +2,13 @@
 
 > Design spec. Read `LOCOLO_V2_ROADMAP.md` §3 for the locked-in defaults (chain, wallet, currency) this assumes. Read `LOCOLO_V2_SECURITY.md` before writing any contract or payment code.
 > Reuses today's `offers` / `price_history` tables and `DigitalAsset` marketplace columns — **extend, don't replace**.
+>
+> **Implementation status (2026-09-28):**
+> - Phase A **trading tables + `buy_listing`:** applied (`2026_v2_marketplace_phase_a.sql`).
+> - Phase A **client:** `MarketplaceRepository` + `MarketplaceSheet` (list/buy/cancel/**auction bid/settle**), provenance, portfolio chart, payouts read UI, `snapshot-portfolio` stub — uncommitted, build green. **CLAUDE §5.21** auctions RPC + **§5.26** owner_id RPCs.
+> - **Mint fee + coupons + provenance SQL:** `2026_v2_mint_coupons_provenance.sql` (apply via status §5.10). Swift mint paywall + Ed25519 authenticity uncommitted.
+> - Phase B: 🟢 client wired — `PaymentService.createIntent` + `startCheckout` → `onramp-session` (stub returns null URL until partner keys). SQL **CLAUDE §5.18**.
+> - Phase C: 🟡 foundation — `2026_v2_marketplace_phase_c.sql` (**CLAUDE §5.19**) + `WalletService`. Needs wallet SDK + audited contracts + chain-webhook.
 
 ---
 
@@ -209,11 +216,20 @@ All financial edge fns require a verified session (`_shared/auth.ts`), validate 
 
 ## 9. Phasing recap (see Roadmap §4)
 
-- **A (off-chain):** wallets(link-only), listings/bids/trades in DB, portfolio + graphs, trading UI. Real product, zero chain risk.
-- **B (fiat):** on-ramp + Apple Pay purchase + payouts + platform fee + KYC thresholds.
-- **C (on-chain):** embedded wallets, Locolo721 + Seaport on Base, USDC + paymaster, indexer reconciliation, provenance, royalties.
+- **A (off-chain):**
+  - ✅ DB: wallets (link-only), `asset_listings` / bids / trades / portfolio_snapshots, `buy_listing` (7.5% royalty / 2.5% fee).
+  - 🟡 Mint gate: coupons + `mint_orders` + `provenance_records` + content hashing / Ed25519 (prod live; repo SQL missing; Swift unfinished).
+  - ⬜ Product UI: list / buy / portfolio graphs / provenance timeline — **next after minting Swift lands**.
+- **B (fiat):** 🟡 SQL + `PaymentService` coded (§5.18). Still need on-ramp edge fn + Apple Pay partner for mint fee + purchases + payouts.
+- **C (on-chain):** 🟡 SQL + `WalletService` coded (§5.19). Still need embedded wallets SDK, Locolo721 + Seaport on Base, USDC + paymaster, indexer reconciliation.
 
 Each phase must pass its **Security gate** (Security spec §Gates) before shipping.
+
+### 9.1 Immediate next steps
+1. 🔴 **CLAUDE: ACTION REQUIRED (owner deferred)** — apply `2026_v2_mint_coupons_provenance.sql` in Supabase (status §5.10). Do not treat mint/coupons as live until this lands.
+2. Commit + push the uncommitted minting + marketplace Swift.
+3. Device-test (after SQL): mint with `LOCOLO100`, list, buy on a second account, confirm provenance + portfolio chart.
+4. Phase B: Apple Pay / Stripe for mint fee and purchases when `total > 0`.
 
 ## 10. Open questions for the owner
 - Edition model: strictly 1-of-1, or allow limited editions / open editions with decreasing value?

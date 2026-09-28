@@ -22,11 +22,17 @@ struct NotificationPrefs: Codable, Equatable {
     var newPosts = true
     var milestones = true
     var nearby = true
+    var reposts = true
+    var reactions = true
+    var quests = true
+    var sales = true
+    var events = true
 
     enum CodingKeys: String, CodingKey {
         case follows, hypes, comments, mentions, offers, messages
         case newPosts = "new_posts"
         case milestones, nearby
+        case reposts, reactions, quests, sales, events
     }
 
     init() {}
@@ -42,20 +48,30 @@ struct NotificationPrefs: Codable, Equatable {
         newPosts = try c.decodeIfPresent(Bool.self, forKey: .newPosts) ?? true
         milestones = try c.decodeIfPresent(Bool.self, forKey: .milestones) ?? true
         nearby = try c.decodeIfPresent(Bool.self, forKey: .nearby) ?? true
+        reposts = try c.decodeIfPresent(Bool.self, forKey: .reposts) ?? true
+        reactions = try c.decodeIfPresent(Bool.self, forKey: .reactions) ?? true
+        quests = try c.decodeIfPresent(Bool.self, forKey: .quests) ?? true
+        sales = try c.decodeIfPresent(Bool.self, forKey: .sales) ?? true
+        events = try c.decodeIfPresent(Bool.self, forKey: .events) ?? true
     }
 
     /// Whether an activity of this server `type` should alert the user.
     func allows(type: String) -> Bool {
         switch type {
         case "follow": return follows
-        case "hype": return hypes
-        case "comment": return comments
+        case "hype", "comment_like": return hypes
+        case "comment", "comment_reply": return comments
         case "mention": return mentions
-        case "offer", "offer_status": return offers
+        case "offer", "offer_status", "outbid": return offers
         case "message": return messages
         case "new_post": return newPosts
         case "discovery", "milestone": return milestones
         case "nearby": return nearby
+        case "repost", "collect", "remix", "tag", "story_view": return reposts
+        case "reaction": return reactions
+        case "quest_complete", "level_up": return quests
+        case "sale", "royalty": return sales
+        case "event_reminder": return events
         default: return true
         }
     }
@@ -94,7 +110,7 @@ final class NotificationPreferences: ObservableObject {
         do {
             let rows: [NotificationPrefs] = try await client
                 .from("notification_prefs")
-                .select("follows, hypes, comments, mentions, offers, messages, new_posts, milestones, nearby")
+                .select("follows, hypes, comments, mentions, offers, messages, new_posts, milestones, nearby, reposts, reactions, quests, sales, events")
                 .eq("user_id", value: me)
                 .limit(1)
                 .execute()

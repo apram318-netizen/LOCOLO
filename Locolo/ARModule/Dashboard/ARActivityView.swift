@@ -22,6 +22,8 @@ struct ARActivityView: View {
         case follows = "Follows"
         case hypes = "Hypes"
         case comments = "Comments"
+        case social = "Social"
+        case sales = "Sales"
         case offers = "Offers"
 
         var id: String { rawValue }
@@ -32,15 +34,29 @@ struct ARActivityView: View {
             case .follows: return "person.badge.plus"
             case .hypes: return "bolt"
             case .comments: return "bubble.right"
+            case .social: return "sparkles"
+            case .sales: return "cart"
             case .offers: return "tag"
             }
         }
 
         func matches(_ kind: SocialActivity.Kind) -> Bool {
             switch (self, kind) {
-            case (.all, _), (.follows, .follow), (.hypes, .hype), (.hypes, .milestone),
-                 (.comments, .comment), (.comments, .mention),
-                 (.offers, .offer), (.offers, .offerUpdate):
+            case (.all, _):
+                return true
+            case (.follows, .follow):
+                return true
+            case (.hypes, .hype), (.hypes, .milestone), (.hypes, .reaction):
+                return true
+            case (.comments, .comment), (.comments, .mention):
+                return true
+            case (.social, .repost), (.social, .collect), (.social, .remix),
+                 (.social, .newPost), (.social, .discovery), (.social, .storyView),
+                 (.social, .questComplete), (.social, .levelUp), (.social, .eventReminder):
+                return true
+            case (.sales, .sale), (.sales, .outbid):
+                return true
+            case (.offers, .offer), (.offers, .offerUpdate):
                 return true
             default:
                 return false
@@ -251,6 +267,16 @@ private struct ActivityRow: View {
             case .newPost:     return ("sparkles", [.pink, .purple])
             case .discovery:   return ("location.north.fill", [.teal, .blue])
             case .milestone:   return ("flame.fill", [.orange, .red])
+            case .repost:      return ("arrow.2.squarepath", [.cyan, .blue])
+            case .collect:     return ("square.stack.3d.up.fill", [.indigo, .purple])
+            case .reaction:    return ("face.smiling.fill", [.pink, .orange])
+            case .remix:       return ("wand.and.stars", [.purple, .blue])
+            case .questComplete, .levelUp:
+                               return ("trophy.fill", [.yellow, .orange])
+            case .sale:        return ("dollarsign.circle.fill", [.green, .mint])
+            case .outbid:      return ("arrow.down.circle.fill", [.orange, .red])
+            case .eventReminder: return ("calendar", [.teal, .cyan])
+            case .storyView:   return ("circle.dashed", [.pink, .purple])
             }
         }()
         return Image(systemName: icon)
@@ -295,6 +321,26 @@ private struct ActivityRow: View {
             text = text + Text(" offered ") + Text(amount, format: .currency(code: "USD")).bold()
                 + Text(" for ") + Text(assetName).bold()
                 + Text(status.lowercased() == "pending" ? "." : " · \(status.capitalized).")
+        case .repost:
+            text = text + Text(" reposted ") + Text(assetName).bold() + Text(".")
+        case .collect:
+            text = text + Text(" saved ") + Text(assetName).bold() + Text(" to a board.")
+        case .reaction(let emoji):
+            text = text + Text(" reacted \(emoji) to ") + Text(assetName).bold() + Text(".")
+        case .remix:
+            text = text + Text(" remixed ") + Text(assetName).bold() + Text(".")
+        case .questComplete:
+            text = Text("Quest complete — keep exploring.")
+        case .levelUp:
+            text = Text("You leveled up in your Passport.")
+        case .sale:
+            text = text + Text(" bought ") + Text(assetName).bold() + Text(".")
+        case .outbid:
+            text = Text("You were outbid on ") + Text(assetName).bold() + Text(".")
+        case .eventReminder:
+            text = Text("An AR event is starting soon.")
+        case .storyView:
+            text = text + Text(" viewed your story.")
         }
         if let date = item.date {
             text = text + Text("  \(date.shortRelative)").foregroundColor(.secondary)

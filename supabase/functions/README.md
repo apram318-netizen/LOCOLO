@@ -11,8 +11,13 @@ ranks on. Model: **OpenAI `text-embedding-3-small` (1536 dims)** — must match 
 | `update-taste` | App call on hype/explore | Signed-in user (user = JWT subject) | Fold asset embedding into `users.taste_embedding` (EMA) |
 | `embed-query` | App call on search | Signed-in user | Embed a query string → return vector for `p_query_embedding` |
 | `send-push` | DB webhook on `notifications` INSERT | `x-webhook-secret` header only (deploy with `--no-verify-jwt`) | Deliver a notification to the recipient's iPhones via APNs. Setup: `docs/LOCOLO_AR_STATUS.md` §5.3c |
+| `onramp-session` | App (Phase B) | Signed-in user | Stub until partner keys |
+| `chain-webhook` | Indexer (Phase C) | webhook secret | Stub until contracts + audit |
+| `snapshot-portfolio` | Cron | cron secret | Stub nightly valuation |
+| `firebase-custom-token` | App after Supabase login | Signed-in user | Stub until `FIREBASE_SERVICE_ACCOUNT_JSON` + Admin mint (§5.8) |
+| `purge-storage` | Cron | `x-cron-secret` | Drain `pending_storage_deletes` (§5.27) |
 
-All three share `_shared/auth.ts`. The gateway's JWT check accepts the public
+Embedding helpers share `_shared/auth.ts`. The gateway's JWT check accepts the public
 anon key, so each function calls `requireUser()` to resolve the real signed-in
 user and rejects anon calls with 401. The app sends the session access token
 (`EdgeFunctions.request` in `Locolo/ARModule/Services/EdgeFunctions.swift`).

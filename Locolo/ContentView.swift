@@ -75,16 +75,42 @@ struct ContentView: View {
     }
     
     private func signInFirebaseIfNeeded() async {
+        // Prefer Firebase custom token bound to Supabase uid (§5.8). Fall back
+        // to anonymous when the edge fn isn't deployed / secret missing.
+        if let token = await fetchFirebaseCustomToken() {
+            do {
+                _ = try await Auth.auth().signIn(withCustomToken: token)
+                LocoloLog.chat.info("Firebase custom-token sign-in ok")
+                return
+            } catch {
+                LocoloAnalytics.record(error: error, context: "firebase_custom_token")
+            }
+        }
         if Auth.auth().currentUser == nil {
             do {
-                let _ = try await Auth.auth().signInAnonymously()
-                print(" Signed in to Firebase anonymously.")
+                _ = try await Auth.auth().signInAnonymously()
+                LocoloLog.chat.info("Firebase anonymous sign-in (custom token unavailable)")
             } catch {
-                print(" Firebase anonymous sign-in failed:", error)
+                LocoloAnalytics.record(error: error, context: "firebase_anonymous")
             }
-        } else {
+        }
+    }
 
-            print(" Firebase already signed in:", Auth.auth().currentUser?.uid ?? "")
+    private struct TokenResponse: Decodable {
+        let token: String?
+        let stub: Bool?
+    }
+
+    private func fetchFirebaseCustomToken() async -> String? {
+        guard SupabaseManager.shared.currentUserId != nil else { return nil }
+        do {
+            let request = try await EdgeFunctions.request("firebase-custom-token", body: [String: String]())
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            let parsed = try JSONDecoder().decode(TokenResponse.self, from: data)
+            return parsed.token
+        } catch {
+            return nil
         }
     }
 

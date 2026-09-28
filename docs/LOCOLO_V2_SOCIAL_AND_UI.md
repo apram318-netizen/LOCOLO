@@ -1,6 +1,8 @@
 # LOCOLO V2 — Social Depth & Gen-Z UI/UX
 
 > Design spec. Builds on the shipped social layer (feed, comments, hype, follows, profiles, chat, activity, notifications — see `LOCOLO_AR_STATUS.md` §4.8). Extends `EngagementStore`/`ActivityStore`, the feed, and the design system in `ARDesign.swift` / `ARComponents.swift` / `ARSocialComponents.swift`. No chain dependency — ship in parallel with the marketplace.
+>
+> **Implementation status (2026-09-28):** Phase D Tier 1–3 **client complete** — stories, immersive, boards, hashtags, passport/quests/leaderboard, reposts, threads/likes, remixes, collabs, reactions, polls, presence, AR events, mute/close-friends, comment pin/hide, Explore rails, onboarding interests, celebrations, share-to-story. See `LOCOLO_V2_COMPLETION_PLAN.md`. **CLAUDE: ACTION REQUIRED** — apply §5.11–§5.17 + §5.20 (tier23) + §5.22 (notif extras). Group chat E2E deferred §5.23.
 
 ---
 

@@ -56,6 +56,10 @@ enum ARRoute: Hashable {
     case create
     case collection
     case wishlist
+    case boards                                      // Phase D curated boards list (mine)
+    case board(boardId: UUID)                        // Phase D single board
+    case leaderboard                                 // Phase D XP leaderboard
+    case events                                      // Phase D AR meetups / drop nights
     case profile(userId: UUID)                       // WS4 public creator profile
     case followList(userId: UUID, followers: Bool)   // WS4 followers / following list
     case conversations                               // WS6 E2E messages inbox

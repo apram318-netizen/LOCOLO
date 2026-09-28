@@ -111,7 +111,7 @@ final class ARMediaPlaybackController {
                                     options: [.mixWithOthers, .defaultToSpeaker])
             try session.setActive(true)
         } catch {
-            print("AR media audio session failed:", error.localizedDescription)
+            LocoloLog.ar.error("media audio session failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 }
