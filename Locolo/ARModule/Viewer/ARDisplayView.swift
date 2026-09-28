@@ -15,6 +15,7 @@ import CoreLocation
 
 struct ARDisplayView: View {
     @StateObject private var vm = ARDisplayViewModel()
+    @State private var hypeBurst: UUID?
 
     @State private var snapshot: SnapshotItem?
     @State private var isCapturing = false
@@ -139,6 +140,39 @@ struct ARDisplayView: View {
                 }
             }
 
+
+            // MARK: - In-AR hype button (react to the asset you're at)
+            if vm.isLocalized && vm.nearestReactableAsset != nil {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button {
+                            Task {
+                                if let hyped = await vm.hypeNearest() {
+                                    _ = hyped
+                                    withAnimation { hypeBurst = UUID() }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: vm.nearestIsHyped ? "bolt.fill" : "bolt")
+                                .font(.title3.weight(.bold))
+                                .foregroundColor(vm.nearestIsHyped ? .yellow : .white)
+                                .frame(width: 52, height: 52)
+                                .background(Circle().fill(.ultraThinMaterial))
+                                .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1))
+                                .overlay(alignment: .center) {
+                                    if let burst = hypeBurst {
+                                        HypeBurst().id(burst)
+                                    }
+                                }
+                        }
+                        .accessibilityLabel("Hype the nearest asset")
+                        .padding(.trailing, 20)
+                        .padding(.bottom, 96)
+                    }
+                }
+            }
 
             // MARK: - Trigger flash caption
             if let flash = vm.triggerFlash {
@@ -488,6 +522,31 @@ struct ARViewContainer: UIViewRepresentable {
     }
 }
 
+
+// MARK: - Hype burst
+// A quick shower of bolts flying up from the hype button when you react.
+struct HypeBurst: View {
+    @State private var go = false
+    private let bolts = Array(0..<6)
+
+    var body: some View {
+        ZStack {
+            ForEach(bolts, id: \.self) { i in
+                Image(systemName: "bolt.fill")
+                    .font(.caption)
+                    .foregroundStyle(AppColors.purplePinkGradient)
+                    .offset(x: go ? CGFloat((i - 3) * 14) : 0,
+                            y: go ? -70 - CGFloat(i * 6) : 0)
+                    .opacity(go ? 0 : 1)
+                    .scaleEffect(go ? 1.4 : 0.4)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.9)) { go = true }
+        }
+        .allowsHitTesting(false)
+    }
+}
 
 // MARK: - AR Radar
 // Glass compass ring: N marker tracks true north, purple blips are nearby

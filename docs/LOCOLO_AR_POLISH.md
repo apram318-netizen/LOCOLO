@@ -74,11 +74,14 @@ The trigger system is the AR magic — deepen it.
 ---
 
 ## Suggested build order
-1. **Spatial audio + video-as-texture + trigger effect/haptic pairing** — biggest sensory upgrade on the existing trigger system.
-2. **Discovery reveal + ambient idle life + distance cues** — makes the viewer feel alive/premium.
-3. **AR video capture → Story/share** — the shareable moment (pairs with V2 stories).
-4. **Occlusion + lighting match** (device-gated) — realism leap.
+1. ✅ **Spatial audio + video-as-texture + trigger effect/haptic pairing** — DONE (`ebd23ee`). Spatial `AudioFileResource`, `VideoMaterial` screen, scale-pop + haptic + "✨ came to life" caption on every trigger.
+2. ✅ **Discovery reveal + ambient idle life** — DONE (`ebd23ee`). Materialize-in scale, gentle idle bob, discovery haptic.
+3. **AR video capture → Story/share** — the shareable moment (pairs with V2 stories). (snapshots already exist; video is the new part.)
+4. ✅ **Occlusion + lighting match** (device-gated) — DONE (`ebd23ee`). Person-segmentation + LiDAR mesh occlusion + image-based lighting.
 5. **Creation live-preview + placement finesse + draw upgrades.**
-6. **New trigger types, in-AR reactions, Live Activity/widgets** — depth over time.
+6. **New trigger types, ~~in-AR reactions~~, Live Activity/widgets** — in-AR hype ✅ DONE (floating bolt button hypes the nearest asset via EngagementStore, with a burst). Remaining: new trigger types, Live Activity/widgets.
+
+**Shipped so far:** spatial audio, video-as-texture, trigger FX + haptics + caption, discovery reveal, ambient idle, occlusion + lighting, in-AR hype reactions, share-asset-in-chat. **All device-only — untested on hardware.**
+**Next up:** AR video capture → Story; creation live-preview + placement finesse + draw brush styles; new trigger types (gaze / time-of-day / weather); Live Activity while exploring; widgets/App Clip.
 
 Every item: simulator-guard AR/Vision code, respect Reduce Motion / Low Power, keep haptics behind the system setting, and add empty/permission/error states. On-device testing is required for all of §1–2 (the whole AR surface is unverified on hardware — see status doc §5.7).
