@@ -395,6 +395,14 @@ Firebase auth is anonymous, so `senderId` is spoofable and `firestore.rules` can
 | 🟡 | Storage cleanup job for deleted accounts | §5.9 |
 | 🟡 | Merge `fresh-start` → GitHub `main` | §5.2 |
 
+**Engineering-health gaps (audited 2026-09-28, not yet addressed):**
+- 🟠 **No tests at all** — 0 test targets / files across 221 Swift files. Add a unit-test target and cover the money-path logic (trade settlement, escrow, RLS behavior, valuation) BEFORE the V2 marketplace lands. Highest-leverage debt.
+- 🟠 **No crash reporting / product analytics** — Firebase is integrated but Crashlytics + Analytics aren't wired. AR is device-only and unverifiable in CI, so field crash reporting is important. Cheap to add on the existing Firebase.
+- 🟡 **Logging hygiene** — ~301 `print()` calls, no unified logger. Move to `os.Logger`, guard/strip in release, and never log user data / tokens / ciphertext (privacy).
+- 🟡 **Legacy non-AR code still in the build** — `Views/{MainView,CreateView,Discover Screen,ExploreScreen,Posts,…}` still compile though the app is AR-only (WS0 "parking" never done). Move to a `_Parked/` group excluded from the target: less bloat, attack surface, and confusion.
+- 🟡 **No localization** — all strings hardcoded English; add a String Catalog (`.xcstrings`) when targeting non-English markets.
+- Good signals: 0 `try!` force-unwraps; only 13 TODO/FIXME.
+
 Smaller gaps: push delivery needs §5.3c. Until then alerts are local and only fire while the app is alive, including background location wakes. The client-side fallback aggregation caps at the newest 300 of your assets; no comment likes/threads beyond @mentions; full-text search is client-side (DB `search_tsv` unused); `AssetDetailViewModel` is dead code; 40-entity cap is per placement pass, not a scene total; Collection lists your own creations (no purchase ownership model yet); key rotation makes old messages unreadable (no ratchet / forward secrecy); multiple devices per account = last device's key wins.
 
 ## 8. Environment gotchas
