@@ -1,7 +1,8 @@
 # LOCOLO AR — Project Status, Handoff & Runbooks
 
 > **Audience:** AI coding agents and humans picking up this codebase.
-> **Companion to:** `docs/LOCOLO_AR_RELEASE_SPEC.md` (the WS0–WS9 spec — read it for intent; read THIS for what actually exists and how to finish it).
+> **Companion to:** `docs/LOCOLO_AR_RELEASE_SPEC.md` (the WS0–WS9 V1 spec — read it for intent; read THIS for what actually exists and how to finish it).
+> **Next phase (design, not built):** `docs/LOCOLO_V2_ROADMAP.md` (umbrella) → `LOCOLO_V2_MARKETPLACE.md` (blockchain/trading/payments/portfolio graphs), `LOCOLO_V2_SOCIAL_AND_UI.md` (deeper social + Gen-Z design), `LOCOLO_V2_SECURITY.md` (security/compliance for money+keys). Start with the Roadmap's §3 decision table.
 > **Last updated:** 2026-09-27 · branch `fresh-start` · simulator build green via `xcodebuild`.
 > **Git state:** stage 8 committed on `fresh-start` (local; push with §5.2). Stage 6 is `9f73f48`. GitHub `main` (`447c938`) is a direct ancestor, so merging is a fast-forward (§5.2).
 > **🟢 DB migrations now APPLIED to prod (2026-09-28):** safety/hardening (§5.3), social/comments (§5.3b), and notifications (§5.3c step 1) are all live, plus a flat-view RLS fix. RLS is on for all 26 tables; the critical "anon can read every email / hype as anyone" hole is closed. Still pending: `send-push` deploy + webhook + `push_enabled` flip (§5.3c steps 2–6), edge functions (§5.4), chat identity binding (§5.8).
