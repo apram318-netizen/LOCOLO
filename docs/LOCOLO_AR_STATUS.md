@@ -3,7 +3,8 @@
 > **Audience:** AI coding agents and humans picking up this codebase.
 > **Companion to:** `docs/LOCOLO_AR_RELEASE_SPEC.md` (the WS0–WS9 spec — read it for intent; read THIS for what actually exists and how to finish it).
 > **Last updated:** 2026-09-27 · branch `fresh-start` · simulator build green via `xcodebuild`.
-> **Git state:** stage 7 (notifications, §4.9) + stage 8 (prod-RPC dump, §5.5) are now committed on `fresh-start` (local; push with §5.2). Stage 6 is `9f73f48`. GitHub `main` (`447c938`) is a direct ancestor of `fresh-start`, so merging is a fast-forward (§5.2).
+> **Git state:** stage 8 committed on `fresh-start` (local; push with §5.2). Stage 6 is `9f73f48`. GitHub `main` (`447c938`) is a direct ancestor, so merging is a fast-forward (§5.2).
+> **🟢 DB migrations now APPLIED to prod (2026-09-28):** safety/hardening (§5.3), social/comments (§5.3b), and notifications (§5.3c step 1) are all live, plus a flat-view RLS fix. RLS is on for all 26 tables; the critical "anon can read every email / hype as anyone" hole is closed. Still pending: `send-push` deploy + webhook + `push_enabled` flip (§5.3c steps 2–6), edge functions (§5.4), chat identity binding (§5.8).
 
 ---
 
@@ -379,9 +380,10 @@ Firebase auth is anonymous, so `senderId` is spoofable and `firestore.rules` can
 
 | Priority | Item | Runbook |
 |---|---|---|
-| 🔴 | Apply safety & hardening migration | §5.3 |
-| 🟠 | Apply social migration (comments) | §5.3b |
-| 🟠 | Apply notifications migration | §5.3c step 1 |
+| ✅ | ~~Apply safety & hardening migration~~ (applied 2026-09-28) | §5.3 |
+| ✅ | ~~Apply social migration (comments)~~ (applied 2026-09-28) | §5.3b |
+| ✅ | ~~Apply notifications migration~~ (applied 2026-09-28) | §5.3c step 1 |
+| ✅ | ~~Fix digital_assets_flat SECURITY DEFINER view~~ (applied 2026-09-28) | `2026_ar_flat_view_rls.sql` |
 | 🟠 | APNs key + Push capability + `send-push` + webhook + `push_enabled` | §5.3c steps 2–6 |
 | ✅ | ~~Commit stage 7~~ (done) | §5.2 |
 | 🔴 | Chat identity binding (Firebase custom token) | §5.8 |
@@ -407,6 +409,8 @@ Smaller gaps: push delivery needs §5.3c. Until then alerts are local and only f
 
 ## 9. Changelog (newest first)
 
+- **2026-09-28 (stage 9) — DB migrations applied to prod:** ran `2026_ar_safety_and_hardening.sql`, `2026_ar_social.sql`, `2026_ar_notifications.sql` via MCP, plus `2026_ar_flat_view_rls.sql` (new). RLS now on for all 26 public tables (86 policies); the critical anon email/hype exposure is closed; read RPCs are SECURITY INVOKER; comments + the notifications backend (triggers, prefs, device tokens, cross-device read state) are live with `push_enabled=false`. Verified via security advisor: the RLS-disabled critical is gone and the SECURITY DEFINER view ERROR is fixed.
+  - **Residual advisor findings (reviewed, non-blocking):** (a) 34 legacy functions have a mutable `search_path` (WARN — the AR functions added here all pin `search_path=public`; the rest are pre-existing loop/place helpers); (b) `pg_trgm`/`vector` live in the `public` schema (WARN, cosmetic); (c) GraphQL "table visible to anon/authenticated" lints — informational, RLS still gates every row; (d) a few SECURITY DEFINER RPCs are callable by anon/authenticated by design (`email_registered` needs anon for the forgot-password check; `toggle_asset_hype`/`notify_message`/`register_device_token` self-authorize via `auth.uid()`); (e) leaked-password protection is a dashboard Auth toggle (enable in Supabase → Auth → Passwords). None block launch.
 - **2026-09-27 (stage 8) — committed:** committed stage 7 (notifications) so it isn't lost; captured the 5 prod-live RPCs (`get_nearby_assets_full`, `get_asset_full`, `get_recommended_assets`, `get_follow_counts`, `toggle_asset_hype`) into `docs/migrations/2026_prod_rpcs_dump.sql` (they existed only in prod). Full build green. `get_comment_counts` intentionally excluded (ships with the unapplied social migration).
 - **2026-09-27 (stage 7) — committed:** notifications (§4.9).
   - Server: `notifications` table fed by triggers for follows, hypes, comments, @mentions, offers and offer answers, new drops to followers, discoveries, hype/explorer milestones, and messages (`notify_message`). Plus notification preferences, APNs device tokens, cross-device chat read state (`conversation_reads`), and the `app_config.push_enabled` flag (`2026_ar_notifications.sql`). New `send-push` edge function (direct APNs with an ES256 JWT, prefs, badge, thread and collapse ids, stale-token cleanup).
