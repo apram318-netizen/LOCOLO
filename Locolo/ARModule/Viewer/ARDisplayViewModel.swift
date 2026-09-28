@@ -40,6 +40,8 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
     @Published var trackingMode: TrackingMode = .geo
     @Published var nearbyAssets: [DigitalAsset] = []
     @Published var listeningHint: String?
+    /// Transient caption shown when an asset's trigger fires ("✨ … came to life").
+    @Published var triggerFlash: String?
 
     /// Device compass heading in degrees (true north), for the AR radar.
     @Published var headingDegrees: Double?
@@ -151,6 +153,14 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         }
         triggerEngine.onPlaybackMessage = { [weak self] message in
             self?.statusMessage = message
+        }
+        triggerEngine.onTriggerFired = { [weak self] asset in
+            self?.triggerFlash = "✨ \(asset.name ?? "Asset") came to life"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if self?.triggerFlash?.contains(asset.name ?? "Asset") == true {
+                    self?.triggerFlash = nil
+                }
+            }
         }
     }
 
@@ -378,11 +388,16 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
 
         let config = ARGeoTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
-        config.environmentTexturing = .automatic
+        config.environmentTexturing = .automatic   // image-based lighting match
+        // People occlusion: assets sit behind passers-by where supported.
+        if ARGeoTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth) {
+            config.frameSemantics.insert(.personSegmentationWithDepth)
+        }
 
         statusMessage = "Starting AR session"
         arView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
         arView.session.delegate = self
+        enableRealismOptions()
 
         armGeoFallback()
     }
@@ -422,11 +437,30 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
         let config = ARWorldTrackingConfiguration()
         config.worldAlignment = .gravityAndHeading
         config.planeDetection = [.horizontal]
-        config.environmentTexturing = .automatic
+        config.environmentTexturing = .automatic   // image-based lighting match
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth) {
+            config.frameSemantics.insert(.personSegmentationWithDepth)
+        }
+        // LiDAR scene mesh → assets occlude behind real geometry where available.
+        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+            config.sceneReconstruction = .mesh
+        }
 
         statusMessage = "Starting GPS AR. Move your phone to begin"
         arView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
         arView.session.delegate = self
+        enableRealismOptions()
+    }
+
+    /// Turns on RealityKit occlusion rendering when the device supports it.
+    /// Safe to call after any session.run; no-op where unsupported.
+    private func enableRealismOptions() {
+        guard let arView = arView else { return }
+        #if !targetEnvironment(simulator)
+        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+            arView.environment.sceneUnderstanding.options.insert(.occlusion)
+        }
+        #endif
     }
 
 
@@ -910,6 +944,8 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
     private func finishPlacement(of asset: DigitalAsset, entity: Entity) {
         entity.generateCollisionShapes(recursive: true)
         triggerEngine.register(asset: asset, rootEntity: entity)
+        revealIntoView(entity)          // materialize-in flourish
+        startIdleBob(entity)            // gentle ambient life
 
         // Mark someone else's asset as explored for the AR profile.
         if let idString = SupabaseManager.shared.currentUserId,
@@ -920,7 +956,40 @@ class ARDisplayViewModel: NSObject, ObservableObject, CLLocationManagerDelegate,
             }
         }
 
+        ARHaptics.discovery()
         statusMessage = "Placed \(asset.name ?? "asset")"
+    }
+
+    /// Scale the asset up from near-zero into its resting size, so it feels like
+    /// it materializes into the world rather than popping in.
+    private func revealIntoView(_ entity: Entity) {
+        let resting = entity.transform
+        var start = resting
+        start.scale = resting.scale * 0.02
+        entity.transform = start
+        entity.move(to: resting, relativeTo: entity.parent,
+                    duration: 0.55, timingFunction: .easeOut)
+    }
+
+    /// A slow vertical ping-pong so placed assets breathe instead of sitting
+    /// frozen. Stops automatically once the entity leaves the scene. Trigger
+    /// pops briefly override it and it resumes on the next tick.
+    private func startIdleBob(_ entity: Entity) {
+        // Kick off after the reveal settles.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self, weak entity] in
+            self?.bobStep(entity, up: true)
+        }
+    }
+
+    private func bobStep(_ entity: Entity?, up: Bool) {
+        guard let entity, entity.parent != nil else { return }
+        var target = entity.transform
+        target.translation.y += up ? 0.015 : -0.015
+        entity.move(to: target, relativeTo: entity.parent,
+                    duration: 2.2, timingFunction: .easeInOut)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.3) { [weak self] in
+            self?.bobStep(entity, up: !up)
+        }
     }
 
 

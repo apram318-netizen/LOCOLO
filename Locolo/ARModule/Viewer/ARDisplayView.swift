@@ -140,6 +140,22 @@ struct ARDisplayView: View {
             }
 
 
+            // MARK: - Trigger flash caption
+            if let flash = vm.triggerFlash {
+                VStack {
+                    Spacer()
+                    Text(flash)
+                        .font(.callout.weight(.bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(Capsule().fill(AppColors.purplePinkGradient))
+                        .shadow(color: .purple.opacity(0.5), radius: 12)
+                        .padding(.bottom, 160)
+                        .transition(.scale.combined(with: .opacity))
+                }
+                .animation(.spring(response: 0.4, dampingFraction: 0.7), value: vm.triggerFlash)
+            }
+
             // MARK: - AR Radar
             // A compass ring showing where nearby assets are around you —
             // blips rotate as you turn, drift inward as you approach.

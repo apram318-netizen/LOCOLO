@@ -64,6 +64,28 @@ enum ARHaptics {
     static func pulse(intensity: CGFloat) {
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: max(0.1, min(1, intensity)))
     }
+
+    /// An AR asset materialized into view — a soft double tick.
+    static func discovery() {
+        let g = UIImpactFeedbackGenerator(style: .soft)
+        g.impactOccurred(intensity: 0.6)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            g.impactOccurred(intensity: 0.9)
+        }
+    }
+
+    /// A trigger fired (animation/media played) — a crisp medium tap.
+    static func triggerFired() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.85)
+    }
+
+    /// "You found it!" — a celebratory success ripple.
+    static func found() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            UIImpactFeedbackGenerator(style: .heavy).impactOccurred(intensity: 0.8)
+        }
+    }
 }
 
 // MARK: - Glass card

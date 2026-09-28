@@ -28,6 +28,9 @@ final class TriggerEngine {
     /// Set when speech listening starts, for the status banner.
     var onListeningHintChanged: ((String?) -> Void)?
     var onPlaybackMessage: ((String) -> Void)?
+    /// Fired (main thread) when any asset's trigger activates, so the view can
+    /// show an on-screen flourish/caption.
+    var onTriggerFired: ((DigitalAsset) -> Void)?
 
     // MARK: Register a placed asset
     /// - Description: Called after a model is anchored. Sets up whichever
@@ -124,7 +127,27 @@ final class TriggerEngine {
         guard let entry = placed[id] else { return }
 
         playAnimationIfAvailable(for: entry)
-        mediaPlayer.playMedia(for: entry.asset)
+        mediaPlayer.playMedia(for: entry.asset, on: entry.root)
+
+        // Sensory pairing: a quick scale-pop on the entity + a haptic, so every
+        // trigger feels physical even for assets without an embedded animation.
+        popEffect(on: entry.root)
+        ARHaptics.triggerFired()
+        onTriggerFired?(entry.asset)
+    }
+
+    /// A brief squash-and-stretch pop, then settle back to the resting scale.
+    private func popEffect(on entity: Entity) {
+        let base = entity.scale
+        var popped = entity.transform
+        popped.scale = base * 1.12
+        entity.move(to: popped, relativeTo: entity.parent, duration: 0.12, timingFunction: .easeOut)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) { [weak entity] in
+            guard let entity else { return }
+            var settle = entity.transform
+            settle.scale = base
+            entity.move(to: settle, relativeTo: entity.parent, duration: 0.18, timingFunction: .easeInOut)
+        }
     }
 
     private func playAnimationIfAvailable(for entry: Placed) {
