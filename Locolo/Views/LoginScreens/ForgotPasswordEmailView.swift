@@ -2,119 +2,59 @@
 //  ForgotPasswordEmailView.swift
 //  Locolo
 //
-//  Created by Apramjot Singh on 16/11/2025.
+//  Step 1 of password reset: email → 6-digit code (EmailCodeView .reset)
+//  → NewPasswordView. Never creates accounts and never reveals whether an
+//  address is registered.
 //
 
 import SwiftUI
 
 struct ForgotPasswordEmailView: View {
-    
+    @EnvironmentObject var userVM: UserViewModel
+    @Binding var path: [AuthRoute]
+
     @State private var email = ""
     @State private var isSending = false
-    @State private var goToOTP = false
-    @State private var localError: String?
-    
-    @EnvironmentObject var userVM: UserViewModel
-    
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 32) {
-                
-                Spacer()
-                
-                // MARK: - Header
-                VStack(spacing: 10) {
-                    Text("Reset Password")
-                        .font(.system(size: 34, weight: .heavy, design: .rounded))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.blue, .purple, .pink],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                    
-                    Text("Enter your email to receive a one-time password (OTP)")
-                        .font(.system(size: 16, weight: .medium, design: .rounded))
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                }
-                
-                // MARK: - Email Field
-                TextField("Email", text: $email)
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .cornerRadius(12)
-                    .keyboardType(.emailAddress)
-                    .autocapitalization(.none)
-                    .padding(.horizontal, 24)
-                
-                // MARK: - Errors
-                if let err = localError {
-                    Text(err)
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .padding(.horizontal)
-                        .multilineTextAlignment(.center)
-                }
+    @State private var error: String?
 
-                if let globalError = userVM.errorMessage {
-                    Text(globalError)
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .padding(.horizontal)
-                        .multilineTextAlignment(.center)
-                }
-                
-                // MARK: - Button
-                Button {
-                    Task {
-                        localError = nil
-                        userVM.errorMessage = nil
-                        
-                        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
-                        
-                        guard !trimmed.isEmpty else {
-                            localError = "Please enter an email."
-                            return
-                        }
-                        
-                        guard trimmed.contains("@") && trimmed.contains(".") else {
-                            localError = "Please enter a valid email address."
-                            return
-                        }
-                        
-                        isSending = true
-                        let ok = await userVM.startResetPassword(email: trimmed)
-                        isSending = false
-                        
-                        if ok { goToOTP = true }
+    var body: some View {
+        AuthScaffold {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    AuthHeader(title: "Reset password",
+                               subtitle: "Enter your account email and we'll send you a 6-digit code.")
+                    AuthField(icon: "envelope", placeholder: "Email", text: $email,
+                              keyboard: .emailAddress, content: .emailAddress)
+                        .submitLabel(.send)
+                        .onSubmit(send)
+                    AuthMessage(error: error, info: nil)
+                    Button(action: send) {
+                        if isSending { ProgressView().tint(.black) } else { Text("Send code") }
                     }
-                } label: {
-                    Text(isSending ? "Sending..." : "Send OTP")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(
-                            LinearGradient(colors: [.blue, .purple],
-                                           startPoint: .leading,
-                                           endPoint: .trailing)
-                        )
-                        .cornerRadius(12)
-                        .foregroundColor(.white)
-                        .font(.headline)
+                    .buttonStyle(AuthPrimaryButtonStyle())
+                    .disabled(isSending)
                 }
-                .padding(.horizontal, 24)
-                
-                NavigationLink("", destination: OTPVerifyView(email: email), isActive: $goToOTP)
-                    .hidden()
-                
-                Spacer()
+                .padding(24)
             }
-            .padding()
-            .onAppear {
-                localError = nil
-                userVM.errorMessage = nil
+        }
+        .onAppear {
+            userVM.clearAuthMessages()
+            error = nil
+        }
+        .onChange(of: email) { error = nil }
+    }
+
+    private func send() {
+        guard !isSending else { return }
+        isSending = true
+        error = nil
+        Task {
+            let ok = await userVM.startResetPassword(email: email)
+            isSending = false
+            if ok {
+                path.append(.verifyReset(email: email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()))
+            } else {
+                error = userVM.errorMessage
             }
         }
     }

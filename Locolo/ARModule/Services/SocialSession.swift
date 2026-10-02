@@ -31,6 +31,10 @@ enum SocialSession {
         PresenceStore.shared.configure(me: me)
         EventsStore.shared.configure(me: me)
         CollabStore.shared.reset()
+        MemoryStore.shared.configure(me: me)
+        PostStore.shared.configure(me: me)
+        // Settles App Store mint purchases interrupted before verification (needs a session).
+        MintPurchaseService.shared.start()
 
         async let prefs: Void = NotificationPreferences.shared.load(me: me)
         async let push: Void = PushRegistry.shared.start(me: me)
@@ -43,6 +47,7 @@ enum SocialSession {
         async let wallets: Void = WalletService.shared.refresh()
         async let safetyExtras: Void = SafetyExtrasStore.shared.configure(me: me)
         async let events: Void = EventsStore.shared.refresh()
+        async let features: Void = AppFeatures.shared.refresh()
 
         // The Firestore listener needs a Firebase session; ContentView signs
         // in concurrently, so give it a moment instead of racing it.
@@ -51,10 +56,11 @@ enum SocialSession {
         }
         InboxStore.shared.start(userId: me.uuidString)
 
-        _ = await (prefs, push, follows, activity, stories, boards, tags, progress, wallets, safetyExtras, events)
+        _ = await (prefs, push, follows, activity, stories, boards, tags, progress, wallets, safetyExtras, events, features)
         ProximityNotifier.shared.start(me: me)
         BadgeSync.shared.start()
         startBackgroundRefresh()
+        BackgroundExploreService.shared.restoreIfNeeded()
         Task { await PresenceStore.shared.heartbeat() }
     }
 
@@ -72,6 +78,7 @@ enum SocialSession {
         ProgressStore.shared.reset()
         RepostStore.shared.reset()
         WalletService.shared.reset()
+        AppFeatures.shared.reset()
         ReactionStore.shared.reset()
         RemixStore.shared.reset()
         PollStore.shared.reset()
@@ -79,6 +86,9 @@ enum SocialSession {
         EventsStore.shared.reset()
         SafetyExtrasStore.shared.reset()
         CollabStore.shared.reset()
+        MemoryStore.shared.reset()
+        PostStore.shared.reset()
+        BackgroundExploreService.shared.stop()
         InboxStore.shared.resetForSignOut()
         CreatorCache.shared.reset()
     }

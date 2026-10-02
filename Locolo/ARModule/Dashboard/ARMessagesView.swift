@@ -28,6 +28,7 @@ struct ARMessagesView: View {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return list }
         return list.filter { c in
+            if c.isGroupChat { return (c.name ?? "").lowercased().contains(q) }
             guard let peer = inbox.peer(of: c) else { return false }
             return peer.displayName.lowercased().contains(q) || peer.username.lowercased().contains(q)
         }
@@ -55,7 +56,7 @@ struct ARMessagesView: View {
                     Button { showCompose = true } label: {
                         Label("New message", systemImage: "square.and.pencil")
                     }
-                    Button { showGroupScaffold = true } label: {
+                    Button { dashboardState.path.append(.newGroup) } label: {
                         Label("New group", systemImage: "person.3")
                     }
                 } label: {
@@ -75,7 +76,7 @@ struct ARMessagesView: View {
                 ARInlineEmptyState(
                     icon: "lock.shield.fill",
                     title: "Group chats coming soon",
-                    subtitle: "1:1 messages stay end-to-end encrypted today. Multi-person sender-keys land after chat identity (§5.8) — we won't store plaintext groups."
+                    subtitle: "Every message stays end-to-end encrypted."
                 )
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -157,14 +158,24 @@ struct ARMessagesView: View {
             dashboardState.path.append(.chat(conversationId: id))
         } label: {
             HStack(spacing: 12) {
-                ARAvatarView(url: peer?.avatarUrl, name: peer?.displayName ?? "?", size: 54)
+                Group {
+                    if convo.isGroupChat {
+                        ZStack {
+                            Circle().fill(AppColors.purplePinkGradient)
+                            Image(systemName: "person.3.fill").foregroundStyle(.white)
+                        }
+                        .frame(width: 54, height: 54)
+                    } else {
+                        ARAvatarView(url: peer?.avatarUrl, name: peer?.displayName ?? "?", size: 54)
+                    }
+                }
                     .padding(2)
                     .overlay(Circle().strokeBorder(unread ? AnyShapeStyle(AppColors.purplePinkGradient)
                                                           : AnyShapeStyle(Color.clear), lineWidth: 2))
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 4) {
-                        Text(peer?.displayName ?? "Locolo explorer")
+                        Text(convo.isGroupChat ? (convo.name ?? "Group") : (peer?.displayName ?? "Locolo explorer"))
                             .font(.subheadline.weight(unread ? .bold : .semibold))
                             .foregroundColor(.primary)
                             .lineLimit(1)

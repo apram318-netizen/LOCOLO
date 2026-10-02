@@ -33,6 +33,7 @@ struct ARSocialAssetCard: View {
     @State private var burst = false
     @State private var showReport = false
     @State private var showSaveToBoard = false
+    @State private var sharePayload: ARSharePayload?
 
     private var isHyped: Bool { engagement.isHyped(asset.id) }
     private var hypeCount: Int { engagement.hypeCount(for: asset) }
@@ -55,16 +56,11 @@ struct ARSocialAssetCard: View {
             actionRow
             captionSection
         }
-        .background(Color.adaptive(
-            light: Color(.systemBackground),
-            dark: Color(red: 0.10, green: 0.07, blue: 0.18)
-        ))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(ARDesign.hairline, lineWidth: 1)
-        )
-        .shadow(color: AppColors.cardShadow, radius: 18, x: 0, y: 6)
+        // Instagram-style: edge-to-edge post, no floating card chrome, so the
+        // media uses the full screen width (V3 feedback).
+        .background(ARDesign.screenBackground)
+        .overlay(alignment: .bottom) { Rectangle().fill(ARDesign.hairline).frame(height: 0.5) }
+        .sheet(item: $sharePayload) { ARShareSheet(payload: $0) }
         .onAppear {
             isWishlisted = wishlistVM.items.contains { $0.id == asset.id }
         }
@@ -133,10 +129,13 @@ struct ARSocialAssetCard: View {
 
     private var overflowMenu: some View {
         Menu {
+            Button { sharePayload = .asset(asset) } label: {
+                Label("Send to friends…", systemImage: "paperplane")
+            }
             ShareLink(item: DeepLinkRouter.assetURL(for: asset.id),
                       subject: Text(asset.name ?? "AR creation"),
                       message: Text("Check out \(asset.name ?? "this AR creation") on Locolo")) {
-                Label("Share…", systemImage: "square.and.arrow.up")
+                Label("Share externally…", systemImage: "square.and.arrow.up")
             }
             Button {
                 UIPasteboard.general.url = DeepLinkRouter.assetURL(for: asset.id)
@@ -172,8 +171,7 @@ struct ARSocialAssetCard: View {
 
     private var mediaSection: some View {
         ZStack(alignment: .bottom) {
-            AssetThumbnailView(asset: asset, cornerRadius: 0)
-                .aspectRatio(4 / 3, contentMode: .fit)
+            AssetPostMedia(asset: asset)
 
             LinearGradient(colors: [.clear, Color.black.opacity(0.55)],
                            startPoint: .center, endPoint: .bottom)
@@ -282,13 +280,12 @@ struct ARSocialAssetCard: View {
                 .accessibilityLabel(isReposted ? "Undo re-drop" : "Re-drop")
             }
 
-            ShareLink(item: DeepLinkRouter.assetURL(for: asset.id),
-                      subject: Text(asset.name ?? "AR creation"),
-                      message: Text("Check out \(asset.name ?? "this AR creation") on Locolo")) {
+            Button { sharePayload = .asset(asset) } label: {
                 Image(systemName: "paperplane")
                     .font(.title3.weight(.semibold))
                     .foregroundColor(.primary)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("Share")
 
             Spacer()
@@ -384,6 +381,50 @@ struct ARSocialAssetCard: View {
                 await wishlistVM.removeFromWishlist(userId: user.id, assetId: asset.id)
             } else {
                 await wishlistVM.addToWishlist(userId: user.id, assetId: asset.id)
+            }
+        }
+    }
+}
+
+
+// MARK: - Post media stage
+
+/// Full-width 4:5 post media. Instead of a cropped thumbnail on flat black,
+/// the asset floats on a stage: its own colours as an aurora, a blurred
+/// echo of the artwork filling the frame, and the artwork itself fitted
+/// (never cropped) with a soft shadow and floor glow.
+struct AssetPostMedia: View {
+    let asset: DigitalAsset
+    @State private var palette = AssetStageBackground.defaultPalette
+
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height) * 0.78
+            ZStack {
+                AssetStageBackground(palette: palette)
+                AssetThumbnailView(asset: asset, cornerRadius: 0)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .blur(radius: 40)
+                    .opacity(0.45)
+                    .blendMode(.screen)
+                Ellipse()
+                    .fill(Color.black.opacity(0.45))
+                    .frame(width: side * 0.8, height: side * 0.12)
+                    .blur(radius: 14)
+                    .offset(y: side * 0.52)
+                AssetThumbnailView(asset: asset, cornerRadius: 22)
+                    .frame(width: side, height: side)
+                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+                    .shadow(color: palette[0].opacity(0.55), radius: 26, y: 12)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .clipped()
+        }
+        .aspectRatio(4 / 5, contentMode: .fit)
+        .task(id: asset.id) {
+            if let colors = await AssetStageBackground.palette(for: asset) {
+                withAnimation(.easeInOut(duration: 0.5)) { palette = colors }
             }
         }
     }

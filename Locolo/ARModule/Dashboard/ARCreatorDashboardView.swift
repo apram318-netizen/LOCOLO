@@ -18,6 +18,7 @@ struct ARCreatorDashboardView: View {
     @EnvironmentObject private var dashboardState: ARDashboardState
     @StateObject private var vm = ARProfileViewModel()
     @ObservedObject private var discoveries = DiscoveryStore.shared
+    @ObservedObject private var features = AppFeatures.shared
 
     private var passport: ExplorerPassport {
         ExplorerPassport.build(
@@ -32,6 +33,7 @@ struct ARCreatorDashboardView: View {
     @ObservedObject private var activity = ActivityStore.shared
 
     @State private var selectedAsset: DigitalAsset?
+    @State private var profileShare: ARSharePayload?
     @State private var offersForAsset: DigitalAsset?
     @State private var followerCount = 0
     @State private var followingCount = 0
@@ -238,9 +240,10 @@ struct ARCreatorDashboardView: View {
                 }
                 .buttonStyle(.plain)
 
-                ShareLink(item: DeepLinkRouter.userURL(for: user.id),
-                          subject: Text(user.name ?? user.username),
-                          message: Text("Check out my AR creations on Locolo")) {
+                Button {
+                    profileShare = .profile(ARCreator(id: user.id, username: user.username, name: user.name,
+                                                      avatarUrl: user.avatarUrl, verifiedFlags: user.verifiedFlags))
+                } label: {
                     Text("Share profile")
                         .font(.subheadline.weight(.bold))
                         .foregroundColor(.primary)
@@ -248,6 +251,8 @@ struct ARCreatorDashboardView: View {
                         .padding(.vertical, 11)
                         .background(Capsule().fill(ARDesign.headerButtonCircle))
                 }
+                .buttonStyle(.plain)
+                .sheet(item: $profileShare) { ARShareSheet(payload: $0) }
 
                 Button { dashboardState.path.append(.profile(userId: user.id)) } label: {
                     Image(systemName: "eye")
@@ -470,8 +475,10 @@ struct ARCreatorDashboardView: View {
             }
             .padding(.horizontal, 16)
 
-            PayoutsCard()
-                .padding(.horizontal, 16)
+            if features.marketplaceEnabled {
+                PayoutsCard()
+                    .padding(.horizontal, 16)
+            }
 
             if let top = vm.topAsset {
                 topPerformerCard(top)

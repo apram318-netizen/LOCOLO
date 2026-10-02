@@ -93,12 +93,29 @@ final class OfferViewModel: ObservableObject {
             try await repo.updateOfferStatus(offerId: offerId, status: status)
             await loadOffers(for: assetId)
         } catch {
-            errorMessage = "Failed to update offer: \(error.localizedDescription)"
+            errorMessage = Self.friendlyUpdateError(error, status: status)
+            await loadOffers(for: assetId)
         }
     }
     
     
     
+
+    /// Raw Postgres text ("violates check constraint offers_status_check")
+    /// means nothing to a seller — translate the cases we know about.
+    static func friendlyUpdateError(_ error: Error, status: String) -> String {
+        let raw = "\(error)".lowercased()
+        if raw.contains("offers_status_check") || raw.contains("23514") {
+            return "Offers can't be \(status) until the latest server update is installed. Please try again later."
+        }
+        if raw.contains("only the owner") || raw.contains("42501") {
+            return "Only the asset's owner can respond to offers."
+        }
+        if raw.contains("already") {
+            return "This offer was already answered."
+        }
+        return "Couldn't update the offer. Check your connection and try again."
+    }
 
     // MARK: FUNCTION: withdrawOffer
     /// - Description: Convenience wrapper to withdraw an offer.

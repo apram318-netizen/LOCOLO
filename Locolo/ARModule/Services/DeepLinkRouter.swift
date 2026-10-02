@@ -55,11 +55,11 @@ final class DeepLinkRouter: ObservableObject {
         return pendingRoute
     }
 
-    static func chatURL(for conversationId: String) -> URL? {
+    nonisolated static func chatURL(for conversationId: String) -> URL? {
         URL(string: "locolo://chat/\(conversationId)")
     }
 
-    static func route(from url: URL) -> ARRoute? {
+    nonisolated static func route(from url: URL) -> ARRoute? {
         guard url.scheme?.lowercased() == "locolo", let host = url.host?.lowercased() else { return nil }
         switch host {
         case "chat":
@@ -68,27 +68,40 @@ final class DeepLinkRouter: ObservableObject {
         case "messages", "inbox": return .conversations
         case "activity", "notifications": return .activity
         case "viewer", "ar": return .viewer
+        case "memory":
+            return url.pathComponents.last.flatMap(UUID.init(uuidString:)).map { .memory(memoryId: $0) }
+        case "post":
+            return url.pathComponents.last.flatMap(UUID.init(uuidString:)).map { .post(postId: $0) }
+        case "reels", "memories": return .memoriesFeed(startAt: nil)
         default: return nil
         }
     }
 
-    static func assetURL(for assetId: UUID) -> URL {
+    nonisolated static func assetURL(for assetId: UUID) -> URL {
         URL(string: "locolo://asset/\(assetId.uuidString.lowercased())")!
     }
 
-    static func userURL(for userId: UUID) -> URL {
+    nonisolated static func memoryURL(for memoryId: UUID) -> URL {
+        URL(string: "locolo://memory/\(memoryId.uuidString.lowercased())")!
+    }
+
+    nonisolated static func postURL(for postId: UUID) -> URL {
+        URL(string: "locolo://post/\(postId.uuidString.lowercased())")!
+    }
+
+    nonisolated static func userURL(for userId: UUID) -> URL {
         URL(string: "locolo://user/\(userId.uuidString.lowercased())")!
     }
 
-    static func assetId(from url: URL) -> UUID? {
+    nonisolated static func assetId(from url: URL) -> UUID? {
         id(from: url, hosts: ["asset"])
     }
 
-    static func userId(from url: URL) -> UUID? {
+    nonisolated static func userId(from url: URL) -> UUID? {
         id(from: url, hosts: ["user", "profile"])
     }
 
-    private static func id(from url: URL, hosts: Set<String>) -> UUID? {
+    nonisolated private static func id(from url: URL, hosts: Set<String>) -> UUID? {
         guard url.scheme?.lowercased() == "locolo",
               let host = url.host?.lowercased(), hosts.contains(host),
               let idString = url.pathComponents.last

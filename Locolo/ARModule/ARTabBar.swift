@@ -29,7 +29,7 @@ struct ARTabBar: View {
         .padding(.horizontal, 18)
         .padding(.bottom, 6)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("AR World tabs")
+        .accessibilityLabel("Loco AR tabs")
     }
 
     private var createButton: some View {

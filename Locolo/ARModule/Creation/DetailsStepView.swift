@@ -26,10 +26,16 @@ struct DetailsStepView: View {
     @State private var couponMessage: String?
     @State private var isPreviewing = false
     @State private var isMinting = false
+    @ObservedObject private var purchases = MintPurchaseService.shared
+
+    /// The App Store's localized price wins over the server's USD quote.
+    private var feeLabel: String {
+        purchases.product?.displayPrice ?? "$\(String(format: "%.2f", quote?.total ?? 2.99))"
+    }
 
     private var mintButtonTitle: String {
         if let q = quote, q.total <= 0 { return "Mint for free" }
-        if let q = quote { return "Mint · $\(String(format: "%.2f", q.total))" }
+        if quote != nil { return "Mint · \(feeLabel)" }
         return "Mint"
     }
 
@@ -49,7 +55,7 @@ struct DetailsStepView: View {
             } header: {
                 Text("Featuring")
             } footer: {
-                Text("Credit collab partners on this drop. Needs §5.20 SQL.")
+                Text("Credit collab partners on this drop.")
             }
 
             Section {
@@ -60,7 +66,7 @@ struct DetailsStepView: View {
             } header: {
                 Text("Poll")
             } footer: {
-                Text("Leave blank to skip. Needs §5.20 polls tables.")
+                Text("Leave blank to skip.")
             }
 
             Section("Location") {
@@ -168,10 +174,13 @@ struct DetailsStepView: View {
                             .fontWeight(.bold)
                             .foregroundStyle(q.total <= 0 ? Color.green : Color.primary)
                     } else {
-                        Text("$\(quote?.total ?? 2.99, specifier: "%.2f")").fontWeight(.semibold)
+                        Text(feeLabel).fontWeight(.semibold)
                     }
                 }
 
+                #if DEBUG
+                // QA only: App Review 3.1.1 forbids unlocking paid features
+                // with our own codes in the shipping app.
                 HStack {
                     TextField("Coupon code", text: $couponText)
                         .textInputAutocapitalization(.characters)
@@ -179,6 +188,7 @@ struct DetailsStepView: View {
                     Button("Apply") { Task { await applyCoupon() } }
                         .disabled(couponText.trimmingCharacters(in: .whitespaces).isEmpty || isPreviewing)
                 }
+                #endif
                 if let couponMessage {
                     Text(couponMessage)
                         .font(.caption)
@@ -197,10 +207,13 @@ struct DetailsStepView: View {
             } header: {
                 Text("Mint")
             } footer: {
-                Text("Minting registers your creation on Locolo's authenticity ledger — signed by you and tamper-evident. Free with a coupon; paid mint opens a Phase B payment intent (Apple Pay / on-ramp once §5.18 + onramp-session are live).")
+                Text("Minting registers your creation on Locolo's authenticity ledger — signed by you and tamper-evident. The mint fee is charged to your Apple Account.")
             }
         }
-        .task { if quote == nil { quote = await MintingService.shared.preview(coupon: nil) } }
+        .task {
+            if quote == nil { quote = await MintingService.shared.preview(coupon: nil) }
+            await purchases.loadProduct()
+        }
         .sheet(isPresented: $showAddressSheet) {
             AddressConfirmationView(vm: vm)
         }
@@ -261,51 +274,22 @@ extension DetailsStepView {
 
     private func mint() async {
         isMinting = true; defer { isMinting = false }
+        #if DEBUG
         let code = couponText.trimmingCharacters(in: .whitespaces)
+        #else
+        let code = ""
+        #endif
         do {
             let order = try await MintingService.shared.createOrder(coupon: code.isEmpty ? nil : code)
-            if order.status == "waived" || order.total <= 0 {
-                vm.mintOrderId = order.order_id
-                ARHaptics.success()
-                saveAction()   // proceeds to upload + sign + insert (provenance auto)
-            } else {
-                // Phase B: create intent via RPC, then open onramp-session checkout.
-                do {
-                    let intent = try await PaymentService.shared.createIntent(
-                        amount: order.total,
-                        purpose: "mint_fee",
-                        mintOrderId: order.order_id
-                    )
-                    let session = await PaymentService.shared.startCheckout(
-                        amount: order.total,
-                        purpose: "mint_fee",
-                        mintOrderId: order.order_id
-                    )
-                    couponValid = false
-                    if let url = session.checkoutURL {
-                        await UIApplication.shared.open(url)
-                        couponMessage = "Checkout opened for $\(String(format: "%.2f", intent.amount)). You'll mint when payment succeeds."
-                    } else {
-                        couponMessage = "Intent \(intent.providerRef.prefix(12))… · \(session.message) Or apply a coupon to mint free now."
-                    }
-                } catch {
-                    // RPC missing — still try the edge stub (it can insert via service role).
-                    let session = await PaymentService.shared.startCheckout(
-                        amount: order.total,
-                        purpose: "mint_fee",
-                        mintOrderId: order.order_id
-                    )
-                    couponValid = false
-                    if let url = session.checkoutURL {
-                        await UIApplication.shared.open(url)
-                        couponMessage = "Checkout opened."
-                    } else {
-                        couponMessage = PaymentService.shared.available
-                            ? (session.message.isEmpty ? error.localizedDescription : session.message)
-                            : "Paid checkout needs §5.18 SQL — apply a coupon to mint now."
-                    }
-                }
+            if order.status != "waived" && order.total > 0 {
+                couponMessage = nil
+                // App Store purchase; the server marks the order paid once
+                // Apple's signed transaction checks out.
+                guard try await MintPurchaseService.shared.purchase(orderId: order.order_id) else { return }
             }
+            vm.mintOrderId = order.order_id
+            ARHaptics.success()
+            saveAction()   // proceeds to upload + sign + insert (provenance auto)
         } catch {
             couponValid = false
             couponMessage = error.localizedDescription

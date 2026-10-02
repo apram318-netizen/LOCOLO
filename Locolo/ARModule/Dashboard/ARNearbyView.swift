@@ -25,13 +25,28 @@ struct ARNearbyView: View {
     @State private var categoryFilter: String = "all"
     @State private var lastFetchTime: Date = .distantPast
     @State private var lastZoomLevel: Double = 0
+    @State private var hasCenteredOnUser = false
+    @State private var searchText = ""
+    @State private var searchResults: [DigitalAsset] = []
+    @State private var isSearching = false
+    @State private var navigateAsset: DigitalAsset?
+    @FocusState private var searchFocused: Bool
+
+    /// ±2.5 km around the user = the 5 km square the map opens on.
+    private static let fiveKmSpan = MKCoordinateSpan(latitudeDelta: 0.045, longitudeDelta: 0.045)
 
     private let panThrottleInterval: TimeInterval = 1.5
     private let minZoomChange: Double = 0.5
     private let categories = ["all", "art", "photo", "3d", "audio"]
 
     private var visibleAssets: [DigitalAsset] {
-        vm.assets.filter { asset in
+        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        return vm.assets.filter { asset in
+            if !q.isEmpty {
+                let hay = [asset.name, asset.description, asset.displayLocation, asset.categoryLabel]
+                    .compactMap { $0?.lowercased() }.joined(separator: " ")
+                guard hay.contains(q) else { return false }
+            }
             guard asset.latitude != nil, asset.longitude != nil, !safety.isHidden(asset) else { return false }
             return categoryFilter == "all"
                 || asset.normalizedCategory == categoryFilter
@@ -62,10 +77,15 @@ struct ARNearbyView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 10) {
                 ARGlassHeader(title: "Nearby", subtitle: "AR assets around you", onExit: onDismiss) {
+                    ARHeaderIconButton(icon: "location.fill", label: "Center on me") {
+                        centerOnUser(animated: true)
+                    }
                     ARHeaderIconButton(icon: "arkit", label: "Open AR viewer", prominent: true) {
                         dashboardState.path.append(.viewer)
                     }
                 }
+                searchBar
+                if searchFocused && !searchText.isEmpty { searchResultsList }
                 filterRow
             }
         }
@@ -74,7 +94,17 @@ struct ARNearbyView: View {
                 assetCarousel
             }
         }
-        .task { vm.requestLocation() }
+        .task {
+            vm.requestLocation()
+            centerOnUser(animated: false)
+        }
+        .onChange(of: vm.userCoordinate?.latitude) { _, _ in
+            if !hasCenteredOnUser { centerOnUser(animated: true) }
+        }
+        .task(id: searchText) { await searchServer() }
+        .fullScreenCover(item: $navigateAsset) { asset in
+            AssetNavigationView(asset: asset)
+        }
         .sheet(item: $detailAsset) { asset in
             AssetDetailSheet(
                 asset: asset,
@@ -165,6 +195,96 @@ struct ARNearbyView: View {
         } else {
             vm.region = region
         }
+    }
+
+    // MARK: - Location & search
+
+    /// Frames a 5 km square around the user (live fix, else last stored).
+    private func centerOnUser(animated: Bool) {
+        guard let coord = vm.userCoordinate ?? LocationManager.shared.userLocation
+                ?? LocationManager.shared.latestStoredLocation else { return }
+        hasCenteredOnUser = true
+        let region = MKCoordinateRegion(center: coord, span: Self.fiveKmSpan)
+        if animated {
+            withAnimation(.easeInOut(duration: 0.8)) { cameraPosition = .region(region) }
+        } else {
+            cameraPosition = .region(region)
+        }
+        Task { await vm.fetchAssetsFor(region: region, zoomLevel: 13) }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search assets on the map", text: $searchText)
+                .focused($searchFocused)
+                .textInputAutocapitalization(.never)
+                .submitLabel(.search)
+            if !searchText.isEmpty {
+                Button { searchText = ""; searchResults = [] } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 42)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 16)
+    }
+
+    /// Matches beyond the loaded map area, from the server (name / place).
+    private var searchResultsList: some View {
+        let merged = (visibleAssets + searchResults.filter { r in !visibleAssets.contains { $0.id == r.id } })
+            .filter { !safety.isHidden($0) }
+            .prefix(8)
+        return VStack(spacing: 0) {
+            if merged.isEmpty {
+                Text(isSearching ? "Searching…" : "No assets match \"\(searchText)\"")
+                    .font(.footnote).foregroundStyle(.secondary).padding(14)
+            }
+            ForEach(Array(merged)) { asset in
+                Button { focus(asset) } label: {
+                    HStack(spacing: 10) {
+                        AssetThumbnailView(asset: asset, cornerRadius: 8).frame(width: 36, height: 36)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(asset.name ?? "Untitled").font(.subheadline.weight(.semibold)).lineLimit(1)
+                            Text([asset.displayLocation, asset.distanceLabel].compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Divider().padding(.leading, 58)
+            }
+        }
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 16)
+    }
+
+    private func focus(_ asset: DigitalAsset) {
+        searchFocused = false
+        guard let lat = asset.latitude, let lon = asset.longitude else { return }
+        if !vm.assets.contains(where: { $0.id == asset.id }) { vm.assets.append(asset) }
+        searchText = ""
+        withAnimation(ARDesign.spring) {
+            selectedAssetId = asset.id
+            cameraPosition = .region(MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: lat, longitude: lon),
+                span: MKCoordinateSpan(latitudeDelta: 0.004, longitudeDelta: 0.004)))
+        }
+    }
+
+    private func searchServer() async {
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+        guard q.count >= 2 else { searchResults = []; return }
+        isSearching = true
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        guard !Task.isCancelled else { return }
+        searchResults = await AssetSearch.byName(q)
+        isSearching = false
     }
 
     // MARK: - Filters
@@ -281,6 +401,17 @@ struct ARNearbyView: View {
                         .accessibilityLabel("Open street view")
 
                         Button {
+                            navigateAsset = asset
+                        } label: {
+                            Image(systemName: "location.north.line.fill")
+                                .font(.caption)
+                                .foregroundColor(.white)
+                                .frame(width: 28, height: 28)
+                                .background(Circle().fill(Color.green.gradient))
+                        }
+                        .accessibilityLabel("Directions")
+
+                        Button {
                             detailAsset = asset
                         } label: {
                             Image(systemName: "info")
@@ -318,18 +449,48 @@ struct ARNearbyView: View {
 
 // MARK: - Street view sheet
 
-/// Full-screen live street view: PanoramaSceneView stitches Google Street
-/// View imagery around the asset's coordinates and places the 3D model in
-/// the middle, with a small glass header so the user knows what they see.
+/// Street-level view of where an asset lives.
+///
+/// Why it "never worked": the Google key's Cloud project has no billing, so
+/// every Street View request returned 403 REQUEST_DENIED and the sphere stayed
+/// grey. Now we ask Google's free metadata endpoint first; if Google can serve
+/// imagery we show the stitched panorama + model, otherwise we fall back to
+/// Apple Look Around (free, no key), and if neither has coverage we say why.
 private struct ARStreetViewSheet: View {
     let asset: DigitalAsset
 
     @Environment(\.dismiss) private var dismiss
+    @State private var source: Source = .checking
+
+    enum Source: Equatable {
+        case checking
+        case google
+        case apple(MKLookAroundScene)
+        case unavailable(String)
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
-            PanoramaSceneView(asset: asset)
-                .ignoresSafeArea()
+            Group {
+                switch source {
+                case .checking:
+                    ProgressView("Finding street imagery…").tint(.white).foregroundStyle(.white)
+                case .google:
+                    PanoramaSceneView(asset: asset)
+                case .apple(let scene):
+                    LookAroundPreview(initialScene: scene, allowsNavigation: true, showsRoadLabels: true)
+                case .unavailable(let reason):
+                    VStack(spacing: 12) {
+                        Image(systemName: "binoculars").font(.system(size: 40)).foregroundStyle(.white.opacity(0.7))
+                        Text("No street view here").font(.headline).foregroundStyle(.white)
+                        Text(reason)
+                            .font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                            .multilineTextAlignment(.center).padding(.horizontal, 40)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
 
             HStack(spacing: 12) {
                 Button { dismiss() } label: {
@@ -356,7 +517,7 @@ private struct ARStreetViewSheet: View {
 
                 Spacer()
 
-                Label("Street View", systemImage: "binoculars.fill")
+                Label(sourceLabel, systemImage: "binoculars.fill")
                     .font(.caption2.weight(.semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 10)
@@ -367,5 +528,50 @@ private struct ARStreetViewSheet: View {
             .padding(.top, 12)
         }
         .background(Color.black.ignoresSafeArea())
+        .task { await resolve() }
+    }
+
+    private var sourceLabel: String {
+        switch source {
+        case .google: return "Google Street View"
+        case .apple: return "Apple Look Around"
+        default: return "Street View"
+        }
+    }
+
+    private func resolve() async {
+        guard let lat = asset.latitude, let lon = asset.longitude else {
+            source = .unavailable("This asset has no saved location.")
+            return
+        }
+        let googleStatus = await StreetViewProbe.googleStatus(lat: lat, lon: lon)
+        if googleStatus == "OK" { source = .google; return }
+
+        let request = MKLookAroundSceneRequest(coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+        if let scene = try? await request.scene {
+            source = .apple(scene)
+            return
+        }
+        switch googleStatus {
+        case "REQUEST_DENIED":
+            source = .unavailable("Google Street View is switched off for this app (the Google Cloud project needs billing enabled), and Apple Look Around has no coverage here.")
+        case "ZERO_RESULTS", "NOT_FOUND":
+            source = .unavailable("Neither Google nor Apple has street-level imagery at this spot.")
+        default:
+            source = .unavailable("Couldn't reach street imagery. Check your connection and try again.")
+        }
+    }
+}
+
+/// Google's Street View metadata endpoint is free and tells us whether a
+/// panorama exists (and whether the key is allowed) before we spend quota.
+enum StreetViewProbe {
+    static func googleStatus(lat: Double, lon: Double) async -> String {
+        guard let url = URL(string: "https://maps.googleapis.com/maps/api/streetview/metadata?location=\(lat),\(lon)&radius=60&key=\(keys.googleAPIKey)"),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let status = json["status"] as? String
+        else { return "UNKNOWN_ERROR" }
+        return status
     }
 }

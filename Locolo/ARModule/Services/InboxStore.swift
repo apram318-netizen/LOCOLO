@@ -80,7 +80,7 @@ final class InboxStore: ObservableObject {
     // MARK: Derived
 
     func peerId(of conversation: Conversation) -> UUID? {
-        guard let me else { return nil }
+        guard let me, !conversation.isGroupChat else { return nil }
         return conversation.participants
             .first { $0.lowercased() != me }
             .flatMap(UUID.init(uuidString:))

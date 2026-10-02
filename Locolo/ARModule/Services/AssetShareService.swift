@@ -21,6 +21,14 @@ final class AssetShareService {
     /// an (encrypted) asset-share message. Returns whether it sent.
     @discardableResult
     func shareAsset(_ assetId: UUID, to peer: UUID, from me: User) async -> Bool {
+        await share(DeepLinkRouter.assetURL(for: assetId), note: nil, to: peer, from: me)
+    }
+
+    /// Sends any Locolo link (asset, memory, post, profile) plus an optional
+    /// note, as separate encrypted messages — exactly like Instagram's
+    /// "Send" sheet. The chat renders the link as a rich card.
+    @discardableResult
+    func share(_ link: URL, note: String?, to peer: UUID, from me: User) async -> Bool {
         let myId = me.id.uuidString.lowercased()
         let peerId = peer.uuidString.lowercased()
 
@@ -36,7 +44,26 @@ final class AssetShareService {
         // Reuse ChatViewModel so the message is encrypted with the same
         // conversation-key logic as a normal send.
         let vm = ChatViewModel(conversationId: convoId, userId: myId, peerId: peer)
-        let link = DeepLinkRouter.assetURL(for: assetId).absoluteString
-        return await vm.sendMessage(link, senderId: myId, senderName: me.name ?? me.username)
+        defer { vm.stopListening() }
+        let name = me.name ?? me.username
+        guard await vm.sendMessage(link.absoluteString, senderId: myId, senderName: name) else { return false }
+        if let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+            _ = await vm.sendMessage(note, senderId: myId, senderName: name)
+        }
+        return true
+    }
+
+    /// Same, into an existing (group) conversation.
+    @discardableResult
+    func share(_ link: URL, note: String?, toConversation convoId: String, from me: User) async -> Bool {
+        let myId = me.id.uuidString.lowercased()
+        let vm = ChatViewModel(conversationId: convoId, userId: myId)
+        defer { vm.stopListening() }
+        let name = me.name ?? me.username
+        guard await vm.sendMessage(link.absoluteString, senderId: myId, senderName: name) else { return false }
+        if let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+            _ = await vm.sendMessage(note, senderId: myId, senderName: name)
+        }
+        return true
     }
 }

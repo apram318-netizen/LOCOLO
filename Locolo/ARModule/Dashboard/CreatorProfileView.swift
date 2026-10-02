@@ -25,6 +25,8 @@ struct CreatorProfileView: View {
     @State private var isOpeningChat = false
     @State private var showReport = false
     @State private var confirmBlock = false
+    @State private var tab: ProfileTab = .stats
+    @State private var sharePayload: ARSharePayload?
 
     private var isBlocked: Bool { safety.isBlocked(userId) }
 
@@ -70,8 +72,10 @@ struct CreatorProfileView: View {
                             blockedState
                         } else {
                             if vm.canFollow || vm.isSelf { actionRow }
-                            if !visiblePins.isEmpty { placementMap }
-                            assetGrid.id("assets")
+                            // Instagram-style sections (V3): passport/stats,
+                            // map of placed + owned, memories & posts, reposts.
+                            ProfileTabBar(selection: $tab).id("assets")
+                            tabContent
                         }
                     }
                     .padding(.horizontal, 16)
@@ -115,6 +119,7 @@ struct CreatorProfileView: View {
                 if id != userId { dashboardState.path.append(.profile(userId: id)) }
             })
         }
+        .sheet(item: $sharePayload) { ARShareSheet(payload: $0) }
         .sheet(isPresented: $showReport) {
             ReportSheet(assetId: nil, userId: userId,
                         subjectName: vm.creator?.displayName ?? "this creator")
@@ -294,7 +299,10 @@ struct CreatorProfileView: View {
 
     private func statsRow(scrollToAssets: @escaping () -> Void) -> some View {
         HStack(spacing: 0) {
-            statPill(count: visibleAssets.count, label: "Assets", action: scrollToAssets)
+            statPill(count: visibleAssets.count, label: "Assets") {
+                tab = .map
+                scrollToAssets()
+            }
             divider
             statPill(count: vm.followers, label: "Followers") {
                 dashboardState.path.append(.followList(userId: userId, followers: true))
@@ -385,16 +393,42 @@ struct CreatorProfileView: View {
     }
 
     private var shareProfileButton: some View {
-        ShareLink(item: DeepLinkRouter.userURL(for: userId),
-                  subject: Text(vm.creator?.displayName ?? "Locolo creator"),
-                  message: Text("Check out \(vm.creator?.displayName ?? "this creator")'s AR creations on Locolo")) {
-            Image(systemName: "square.and.arrow.up")
+        // Instagram-style: send the profile to friends in-app, or share out.
+        Button {
+            if let creator = vm.creator { sharePayload = .profile(creator) }
+        } label: {
+            Image(systemName: "paperplane")
                 .font(.subheadline.weight(.semibold))
                 .foregroundColor(.primary)
                 .frame(width: 46, height: 46)
                 .background(Circle().fill(ARDesign.headerButtonCircle))
         }
+        .disabled(vm.creator == nil)
         .accessibilityLabel("Share profile")
+    }
+
+    @ViewBuilder
+    private var tabContent: some View {
+        switch tab {
+        case .stats:
+            ProfileStatsTab(userId: userId, assets: visibleAssets,
+                            followers: vm.followers, following: vm.following)
+        case .map:
+            ProfileMapTab(userId: userId, placed: visibleAssets) { selectedAsset = $0 }
+        case .memories:
+            ProfileMemoriesTab(userId: userId,
+                               onOpenProfile: { id in if id != userId { dashboardState.path.append(.profile(userId: id)) } },
+                               onOpenLink: { link in
+                                   switch link {
+                                   case .post(let id): dashboardState.path.append(.post(postId: id))
+                                   case .memory(let id): dashboardState.path.append(.memory(memoryId: id))
+                                   case .asset(let id):
+                                       Task { selectedAsset = await DigitalAssetRepository().fetchAsset(id: id) }
+                                   }
+                               })
+        case .reposts:
+            ProfileRepostsTab(userId: userId) { selectedAsset = $0 }
+        }
     }
 
     // MARK: - Placement map

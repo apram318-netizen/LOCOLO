@@ -86,7 +86,7 @@ struct AROnboardingView: View {
                     onDone()
                 }
             } label: {
-                Text(page < lastPageIndex ? "Next" : "Enter the AR World")
+                Text(page < lastPageIndex ? "Next" : "Enter Loco AR")
                     .font(.headline)
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)

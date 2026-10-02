@@ -18,6 +18,7 @@ struct ARChatScreen: View {
 
     @StateObject private var vm: ChatViewModel
     @ObservedObject private var inbox = InboxStore.shared
+    @State private var showGroupInfo = false
 
     init(conversationId: String, peerId: UUID? = nil, title: String = "Chat",
          currentUserId: String, currentUserName: String) {
@@ -37,12 +38,22 @@ struct ARChatScreen: View {
             .navigationTitle(resolvedTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.visible, for: .navigationBar)
+            .toolbar {
+                if vm.isGroup {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { showGroupInfo = true } label: { Image(systemName: "info.circle") }
+                            .accessibilityLabel("Group info")
+                    }
+                }
+            }
+            .sheet(isPresented: $showGroupInfo) { GroupInfoSheet(conversationId: conversationId, vm: vm) }
             .onAppear { inbox.didOpen(conversationId) }
             .onDisappear { inbox.didClose(conversationId) }
     }
 
     /// Falls back to the peer's name from the inbox when pushed by id only.
     private var resolvedTitle: String {
+        if vm.isGroup { return vm.groupName ?? "Group" }
         guard title == "Chat",
               let convo = inbox.conversation(id: conversationId),
               let peer = inbox.peer(of: convo) else { return title }

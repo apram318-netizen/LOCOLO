@@ -46,30 +46,36 @@ struct ContentView: View {
             }
         }
         .task {
+            // ONLY session restore gates the launch screen. Everything else used
+            // to run serially here — Firebase sign-in (which waits on an edge
+            // function round trip), residency reconciliation (potentially
+            // thousands of RPC calls) and key publishing — so cold start took as
+            // long as the slowest of them. They're all fire-and-forget now.
             await userVM.restoreSession()
-            await signInFirebaseIfNeeded()
-            
-            //  Ensure Supabase ID is ready before reconciling
-            if let id = SupabaseManager.shared.currentUserId {
-                
-                LocationManager.shared.startTracking()
 
-                print(" Restored Supabase session for \(id)")
+            withAnimation { isRestoring = false }
 
+            // --- background warm-up, never blocks first paint ---
+            Task.detached(priority: .utility) {
+                await signInFirebaseIfNeeded()
+            }
+
+            guard let id = SupabaseManager.shared.currentUserId else { return }
+
+            LocationManager.shared.startTracking()
+
+            Task.detached(priority: .utility) {
+                // Heavy: reads location history and resolves loops. Deferred so
+                // it can never delay the UI.
                 await LocationUploader.shared.reconcileIfNeeded()
+            }
 
-                // Publish this device's chat public key so peers can encrypt
-                // to us (E2E chat, WS6). Idempotent — only writes if changed.
-                if let uid = UUID(uuidString: id) {
+            if let uid = UUID(uuidString: id) {
+                Task.detached(priority: .utility) {
+                    // Publish this device's chat public key so peers can encrypt
+                    // to us (E2E chat, WS6). Idempotent — only writes if changed.
                     await KeyDirectory.shared.publishMyKey(userId: uid)
                 }
-
-            } else {
-                print(" Skipping reconciliation — Supabase ID not ready yet")
-            }
-            
-            withAnimation {
-                isRestoring = false
             }
         }
     }
@@ -104,7 +110,11 @@ struct ContentView: View {
     private func fetchFirebaseCustomToken() async -> String? {
         guard SupabaseManager.shared.currentUserId != nil else { return nil }
         do {
-            let request = try await EdgeFunctions.request("firebase-custom-token", body: [String: String]())
+            var request = try await EdgeFunctions.request("firebase-custom-token", body: [String: String]())
+            // The function is a 503 stub until the service account is set, and
+            // URLSession's default timeout is 60s — cap it so the anonymous
+            // fallback happens quickly instead of hanging the chat session.
+            request.timeoutInterval = 8
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
             let parsed = try JSONDecoder().decode(TokenResponse.self, from: data)

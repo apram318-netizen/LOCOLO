@@ -69,7 +69,7 @@ struct MarketplaceSheet: View {
                 Button("Buy for \(buyPriceLabel)") { Task { await purchase() } }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Off-chain Phase A — no real money yet.")
+                Text("Ownership moves to you on Locolo.")
             }
         }
     }

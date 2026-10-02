@@ -174,6 +174,14 @@ struct ARDashboardRootView: View {
             ARActivityView()
         case .editProfile:
             AREditProfileView()
+        case .memory(let memoryId):
+            MemoryRouteView(memoryId: memoryId)
+        case .post(let postId):
+            PostDetailRouteView(postId: postId)
+        case .memoriesFeed(let startAt):
+            MemoryReelsView(startAt: startAt)
+        case .newGroup:
+            NewGroupView()
         }
     }
 }

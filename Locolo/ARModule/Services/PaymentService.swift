@@ -160,7 +160,7 @@ final class PaymentService {
     }
 
     var checkoutComingSoonMessage: String {
-        "Apple Pay / card checkout is wired for Phase B. Apply §5.18 SQL and deploy onramp-session (+ partner keys) to go live."
+        "Card checkout isn't available yet."
     }
 
     struct PayoutRow: Identifiable, Equatable, Decodable {

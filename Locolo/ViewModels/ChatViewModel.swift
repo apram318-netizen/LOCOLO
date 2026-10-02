@@ -29,6 +29,17 @@ class ChatViewModel: ObservableObject {
     private var rawMessages: [Message] = []        // ciphertext as received
     private var listenerTask: Task<Void, Never>?
 
+    // MARK: Group state (V3)
+    /// Group threads fan out: every message is sealed once per member with the
+    /// sender↔member pairwise key, so the server stays blind and no group key
+    /// has to be distributed or rotated when people join or leave.
+    @Published private(set) var isGroup = false
+    @Published private(set) var groupName: String?
+    @Published private(set) var groupMembers: [UUID] = []
+    /// Members who haven't published a chat key yet (can't receive).
+    @Published private(set) var unreachableMembers: [UUID] = []
+    private var pairwiseKeys: [String: SymmetricKey] = [:]
+
     // MARK: Init
     init(conversationId: String, userId: String, peerId: UUID? = nil) {
         self.conversationId = conversationId
@@ -43,6 +54,10 @@ class ChatViewModel: ObservableObject {
     /// Resolves the peer (explicit or from the conversation participants),
     /// fetches their public key, and derives the shared conversation key.
     private func prepareKey() async {
+        if peerId == nil, let convo = try? await repo.fetchConversation(conversationId), convo.isGroupChat {
+            await prepareGroupKeys(convo)
+            return
+        }
         var peer = peerId
         if peer == nil {
             let parts = (try? await repo.fetchParticipants(conversationId: conversationId)) ?? []
@@ -68,6 +83,29 @@ class ChatViewModel: ObservableObject {
         applyDecryption()
     }
 
+    private func prepareGroupKeys(_ convo: Conversation) async {
+        isGroup = true
+        groupName = convo.name
+        let members = convo.participants.compactMap { UUID(uuidString: $0) }
+        groupMembers = members
+        var keys: [String: SymmetricKey] = [:]
+        var missing: [UUID] = []
+        for member in members {
+            guard let pub = await KeyDirectory.shared.publicKey(for: member),
+                  let key = try? CryptoService.shared.conversationKey(conversationId: conversationId,
+                                                                      peerPublicKeyBase64: pub)
+            else {
+                if member.uuidString.lowercased() != userId.lowercased() { missing.append(member) }
+                continue
+            }
+            keys[member.uuidString.lowercased()] = key
+        }
+        pairwiseKeys = keys
+        unreachableMembers = missing
+        await CreatorCache.shared.load(members)
+        applyDecryption()
+    }
+
     /// Rebuilds `messages` from `rawMessages`, decrypting with the conversation
     /// key when available. Before the key resolves, legacy plaintext still
     /// reads but anything that looks like ciphertext shows a lock instead of
@@ -75,7 +113,12 @@ class ChatViewModel: ObservableObject {
     private func applyDecryption() {
         messages = rawMessages.map { message in
             var copy = message
-            if let key = conversationKey {
+            if let ciphers = message.ciphers {
+                // Group message: my copy, sealed with the sender↔me key.
+                let mine = ciphers[userId.lowercased()]
+                let key = pairwiseKeys[message.senderId.lowercased()]
+                copy.decryptedText = (mine != nil && key != nil) ? CryptoService.shared.open(mine!, key: key!) : nil
+            } else if let key = conversationKey {
                 copy.decryptedText = CryptoService.shared.open(message.text, key: key)
             } else {
                 copy.decryptedText = Self.looksLikeCiphertext(message.text) ? nil : message.text
@@ -126,9 +169,13 @@ class ChatViewModel: ObservableObject {
     @discardableResult
     func sendMessage(_ text: String, senderId: String, senderName: String) async -> Bool {
         sendError = nil
+        if isGroup {
+            return await sendGroupMessage(text, senderId: senderId, senderName: senderName)
+        }
         if conversationKey == nil {
             // The key may still be resolving (or the peer just published one).
             await prepareKey()
+            if isGroup { return await sendGroupMessage(text, senderId: senderId, senderName: senderName) }
         }
         guard let key = conversationKey, let sealed = try? CryptoService.shared.seal(text, key: key) else {
             sendError = "Can't send securely yet — this person hasn't set up encrypted chat. They'll be able to receive messages after they next open Locolo."
@@ -151,6 +198,40 @@ class ChatViewModel: ObservableObject {
             sendError = "Message didn't send. Check your connection and try again."
             return false
         }
+    }
+
+    private func sendGroupMessage(_ text: String, senderId: String, senderName: String) async -> Bool {
+        var ciphers: [String: String] = [:]
+        for (member, key) in pairwiseKeys {
+            if let sealed = try? CryptoService.shared.seal(text, key: key) { ciphers[member] = sealed }
+        }
+        guard ciphers.keys.contains(where: { $0 != userId.lowercased() }) else {
+            sendError = "No one in this group can receive encrypted messages yet."
+            return false
+        }
+        let msg = Message(senderId: senderId.lowercased(), senderName: senderName,
+                          text: "", time: Date(), ciphers: ciphers)
+        do {
+            try await repo.sendMessage(conversationId: conversationId, message: msg,
+                                       lastMessagePreview: "🔒 \(senderName): Encrypted message")
+            for member in groupMembers where member.uuidString.lowercased() != userId.lowercased() {
+                ARPushEvents.messageSent(conversationId: conversationId, recipient: member)
+            }
+            if !unreachableMembers.isEmpty {
+                sendError = "\(unreachableMembers.count) member(s) haven't set up encrypted chat and won't see this."
+            }
+            return true
+        } catch {
+            sendError = "Message didn't send. Check your connection and try again."
+            return false
+        }
+    }
+
+    /// For short-lived senders (share sheet): drop the Firestore listener now
+    /// rather than whenever the view model happens to deinit.
+    func stopListening() {
+        listenerTask?.cancel()
+        listenerTask = nil
     }
 
     deinit {

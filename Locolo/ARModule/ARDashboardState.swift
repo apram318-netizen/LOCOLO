@@ -67,6 +67,10 @@ enum ARRoute: Hashable {
     case chat(conversationId: String)                // WS6 single conversation
     case activity                                    // follows, hypes, comments, offers
     case editProfile                                 // own profile editor
+    case memory(memoryId: UUID)                      // V3 single memory (snap-style viewer)
+    case post(postId: UUID)                          // V3 single user post + quotes
+    case memoriesFeed(startAt: UUID?)                // V3 Reels-style memories feed
+    case newGroup                                    // V3 group chat creation
 }
 
 // MARK: - State

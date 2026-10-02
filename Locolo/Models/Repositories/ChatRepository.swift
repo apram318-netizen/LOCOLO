@@ -116,12 +116,14 @@ class ChatRepository {
     ///     holds plaintext; defaults to the message body for legacy callers.
     func sendMessage(conversationId: String, message: Message, lastMessagePreview: String? = nil) async throws {
         let ref = db.collection("conversations").document(conversationId)
-        try await ref.collection("messages").addDocument(data: [
+        var data: [String: Any] = [
             "senderId": message.senderId.lowercased(),
             "senderName": message.senderName,
             "text": message.text,   // ciphertext when E2E is active
             "time": Timestamp(date: message.time)
-        ])
+        ]
+        if let ciphers = message.ciphers { data["ciphers"] = ciphers }
+        try await ref.collection("messages").addDocument(data: data)
         try await ref.setData([
             "lastMessage": lastMessagePreview ?? message.text,
             "updatedAt": Timestamp(date: message.time),
@@ -157,6 +159,43 @@ class ChatRepository {
     
     
     
+
+    // MARK: Groups
+
+    /// Creates a group thread. Membership lives in `participants` (so the
+    /// existing inbox query and security rules cover groups unchanged).
+    func createGroup(name: String, creator: String, members: [String]) async throws -> String {
+        let all = Array(Set(([creator] + members).map { $0.lowercased() })).sorted()
+        let ref = try await db.collection("conversations").addDocument(data: [
+            "participants": all,
+            "isGroup": true,
+            "name": name,
+            "admins": [creator.lowercased()],
+            "createdBy": creator.lowercased(),
+            "lastMessage": "Group created",
+            "updatedAt": Timestamp(date: Date())
+        ])
+        return ref.documentID
+    }
+
+    func fetchConversation(_ conversationId: String) async throws -> Conversation? {
+        try await db.collection("conversations").document(conversationId).getDocument(as: Conversation.self)
+    }
+
+    func addMembers(_ ids: [String], to conversationId: String) async throws {
+        try await db.collection("conversations").document(conversationId)
+            .updateData(["participants": FieldValue.arrayUnion(ids.map { $0.lowercased() })])
+    }
+
+    func leaveGroup(_ conversationId: String, userId: String) async throws {
+        try await db.collection("conversations").document(conversationId)
+            .updateData(["participants": FieldValue.arrayRemove([userId.lowercased()]),
+                         "admins": FieldValue.arrayRemove([userId.lowercased()])])
+    }
+
+    func renameGroup(_ conversationId: String, to name: String) async throws {
+        try await db.collection("conversations").document(conversationId).updateData(["name": name])
+    }
 
     // MARK: FUNCTION: deleteConversation
     /// - Description: Deletes a conversation — soft delete for one user, full delete if everyone’s gone.
@@ -218,8 +257,10 @@ class ChatRepository {
             .getDocuments()
 
         for doc in snapshot.documents {
+            // Groups also contain both users — only a 1:1 thread counts.
+            if (doc.data()["isGroup"] as? Bool) == true { continue }
             if let participants = doc.data()["participants"] as? [String],
-               participants.contains(u2) {
+               participants.contains(u2), participants.count == 2 {
                 return doc.documentID
             }
         }

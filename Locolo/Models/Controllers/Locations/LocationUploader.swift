@@ -19,6 +19,17 @@ final class LocationUploader {
     // ---- Residency constants ----
     private let reconciliationThresholdHours: Double = 10 // run every 10 h
 
+    /// Nearby-place lookups are the most expensive part of a ping (network +
+    /// PostGIS). They don't need to run on every upload — the user can't
+    /// meaningfully enter a new place more than once every couple of minutes.
+    private var lastNearbyCheck: Date = .distantPast
+    private let nearbyCheckInterval: TimeInterval = 180
+
+    /// History points feed residency maths; one every few minutes is plenty and
+    /// keeps the collection (and the reconcile read) from growing without bound.
+    private var lastHistoryWrite: Date = .distantPast
+    private let historyWriteInterval: TimeInterval = 300
+
    
     // MARK: FUNCTION: Regular ping uploads (uses Supabase user ID)
     /// - Description: This takes in the user's location and then uploads to the firebase users  collection
@@ -61,36 +72,33 @@ final class LocationUploader {
                 }
             }
         
-        //  Append to history
-        db.collection("users")
-            .document(supabaseId)
-            .collection("location_history")
-            .addDocument(data: data) { err in
-                if let err = err {
-                    print(" Failed to append to history: \(err)")
-                } else {
-                    print(" Added history point for \(supabaseId)")
+        //  Append to history (throttled — see historyWriteInterval)
+        let now = Date()
+        if now.timeIntervalSince(lastHistoryWrite) >= historyWriteInterval {
+            lastHistoryWrite = now
+            db.collection("users")
+                .document(supabaseId)
+                .collection("location_history")
+                .addDocument(data: data) { err in
+                    if let err = err {
+                        print(" Failed to append to history: \(err)")
+                    }
                 }
-            }
-        
-        Task {
-            guard let coord = LocationManager.shared.latestStoredLocation,
-                  let userId = SupabaseManager.shared.currentUserId else { return }
+        }
 
+        // Nearby-place / visit check (throttled — see nearbyCheckInterval)
+        guard now.timeIntervalSince(lastNearbyCheck) >= nearbyCheckInterval else { return }
+        lastNearbyCheck = now
+
+        Task {
             do {
                 let nearby = try await PlacesRepository().checkNearbyPlaces(
-                    lat: coord.latitude,
-                    lon: coord.longitude,
+                    lat: lat,
+                    lon: lon,
                     radiusMeters: 150
                 )
-
-                if nearby.isEmpty {
-                    print(" No nearby Locolo places — skipping visit flow.")
-                    return
-                }
-
-                print(" \(nearby.count) nearby places found → checking visits…")
-                await VisitMonitor.shared.performVisitCheck(using: nearby)   // <— PASS SNAPSHOT
+                guard !nearby.isEmpty else { return }
+                await VisitMonitor.shared.performVisitCheck(using: nearby)
             } catch {
                 print(" Nearby place check failed:", error)
             }
@@ -191,6 +199,7 @@ final class LocationUploader {
             .collection("location_history")
             .whereField("timestamp", isGreaterThan: Timestamp(date: date))
             .order(by: "timestamp", descending: false)
+            .limit(to: 500)   // hard cap: never read an unbounded history
             .getDocuments()
 
         let docs = snapshot.documents
@@ -210,12 +219,28 @@ final class LocationUploader {
 
         var loopDurations: [UUID: Double] = [:]
 
+        // Resolve each ping's loop ONCE, with a coordinate cache. The previous
+        // version issued two findLoop RPCs per consecutive pair — for a day of
+        // pings that was thousands of sequential network round trips. Rounding
+        // to ~11 m buckets collapses a stationary user to a single lookup.
+        var loopCache: [String: UUID?] = [:]
+        func loop(for ping: UserPing) async throws -> UUID? {
+            let key = String(format: "%.4f,%.4f", ping.latitude, ping.longitude)
+            if let hit = loopCache[key] { return hit }
+            let resolved = try await supabase.findLoop(forLat: ping.latitude, lon: ping.longitude)
+            loopCache[key] = resolved
+            return resolved
+        }
+
+        var previousLoop: UUID? = pings.first == nil ? nil : try await loop(for: pings[0])
+
         for (prev, next) in zip(pings, pings.dropFirst()) {
             let durationHours = next.timestamp.timeIntervalSince(prev.timestamp) / 3600.0
             guard durationHours > 0 else { continue }
 
-            let prevLoop = try await supabase.findLoop(forLat: prev.latitude, lon: prev.longitude)
-            let nextLoop = try await supabase.findLoop(forLat: next.latitude, lon: next.longitude)
+            let prevLoop = previousLoop
+            let nextLoop = try await loop(for: next)
+            previousLoop = nextLoop
 
             if prevLoop == nextLoop, let loopId = nextLoop {
                 loopDurations[loopId, default: 0] += durationHours
@@ -225,7 +250,7 @@ final class LocationUploader {
         }
 
         if let lastPing = pings.last,
-           let lastLoop = try? await supabase.findLoop(forLat: lastPing.latitude, lon: lastPing.longitude) {
+           let lastLoop = try? await loop(for: lastPing) {
             let offlineHours = Date().timeIntervalSince(lastPing.timestamp) / 3600.0
             if offlineHours > 0 {
                 loopDurations[lastLoop, default: 0] += offlineHours

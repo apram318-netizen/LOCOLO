@@ -4,6 +4,7 @@
 > **Companion to:** `docs/LOCOLO_AR_RELEASE_SPEC.md` (the WS0–WS9 V1 spec — read it for intent; read THIS for what actually exists and how to finish it).
 > **Next phase (design, not built):** `docs/LOCOLO_V2_ROADMAP.md` (umbrella) → `LOCOLO_V2_MARKETPLACE.md` (blockchain/trading/payments/portfolio graphs), `LOCOLO_V2_SOCIAL_AND_UI.md` (deeper social + Gen-Z design), `LOCOLO_V2_SECURITY.md` (security/compliance for money+keys). Start with the Roadmap's §3 decision table.
 > **AR polish backlog:** `docs/LOCOLO_AR_POLISH.md` — prioritized enhancements to the *existing* AR module (spatial audio, video-as-texture, trigger effects, discovery reveal, occlusion, AR video capture, creation finesse).
+> **🔴 Release:** see `docs/LOCOLO_RELEASE_CHECKLIST.md` (2026-10-03) — single source of truth for what's left before App Store submission.
 > **Last updated:** 2026-09-28 · branch `fresh-start` · tip `626b940` (9 commits ahead of `github/fresh-start`).
 > **Where work is:** V2 Phase A–D client coded in the working tree (uncommitted). Marketplace B/C foundations + Phase D social bulk. Real partner checkout / chain contracts still need edge fns + audits.
 >

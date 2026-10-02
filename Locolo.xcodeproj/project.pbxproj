@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1B2C3D42E90000100000001 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D42E90000100000002 /* FirebaseCrashlytics */; };
+		A1B2C3D42E90000100000003 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D42E90000100000004 /* FirebaseAnalytics */; };
 		D456D9CB2EB1A52E00506516 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9CA2EB1A52E00506516 /* FirebaseAuth */; };
 		D456D9CD2EB1A52E00506516 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9CC2EB1A52E00506516 /* FirebaseFirestore */; };
 		D456D9CF2EB1A52E00506516 /* FirebaseInAppMessaging-Beta in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9CE2EB1A52E00506516 /* FirebaseInAppMessaging-Beta */; };
 		D456D9D12EB1A52E00506516 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9D02EB1A52E00506516 /* FirebaseMessaging */; };
 		D456D9D32EB1A52E00506516 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9D22EB1A52E00506516 /* FirebaseStorage */; };
-		A1B2C3D42E90000100000001 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D42E90000100000002 /* FirebaseCrashlytics */; };
-		A1B2C3D42E90000100000003 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D42E90000100000004 /* FirebaseAnalytics */; };
 		D456D9D62EB1A5BA00506516 /* MessageKit in Frameworks */ = {isa = PBXBuildFile; productRef = D456D9D52EB1A5BA00506516 /* MessageKit */; };
 		D48AE3362EC1833D00B4D13C /* LocoloCache.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = D48AE3342EC1833D00B4D13C /* LocoloCache.xcdatamodeld */; };
 		D4A66A7A2E7BAB980058194E /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A792E7BAB980058194E /* Auth */; };
@@ -24,11 +24,21 @@
 		D4A66A842E7BAB980058194E /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = D4A66A832E7BAB980058194E /* Supabase */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		A1B2C3D42E90000200000008 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D4A669C12E799B570058194E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D4A669C82E799B570058194E;
+			remoteInfo = Locolo;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		A1B2C3D42E90000200000001 /* LocoloTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LocoloTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D443D0722EC5C218007625BE /* LocoloNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LocoloNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		D48AE3352EC1833D00B4D13C /* LocoloCache.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = LocoloCache.xcdatamodel; sourceTree = "<group>"; };
 		D4A669C92E799B570058194E /* Locolo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Locolo.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A1B2C3D42E90000200000001 /* LocoloTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LocoloTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D4A66AB82E8000790058194E /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		D4A66ABA2E8000790058194E /* XcodeKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XcodeKit.framework; path = Library/Frameworks/XcodeKit.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
@@ -51,6 +61,11 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A1B2C3D42E90000200000002 /* LocoloTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LocoloTests;
+			sourceTree = "<group>";
+		};
 		D443D0732EC5C218007625BE /* LocoloNotificationService */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -67,14 +82,16 @@
 			path = Locolo;
 			sourceTree = "<group>";
 		};
-		A1B2C3D42E90000200000002 /* LocoloTests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = LocoloTests;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A1B2C3D42E90000200000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D443D06F2EC5C218007625BE /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -100,13 +117,6 @@
 				D456D9D62EB1A5BA00506516 /* MessageKit in Frameworks */,
 				D456D9D12EB1A52E00506516 /* FirebaseMessaging in Frameworks */,
 				D456D9CF2EB1A52E00506516 /* FirebaseInAppMessaging-Beta in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A1B2C3D42E90000200000003 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -147,6 +157,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A1B2C3D42E90000200000006 /* LocoloTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1B2C3D42E9000020000000A /* Build configuration list for PBXNativeTarget "LocoloTests" */;
+			buildPhases = (
+				A1B2C3D42E90000200000004 /* Sources */,
+				A1B2C3D42E90000200000003 /* Frameworks */,
+				A1B2C3D42E90000200000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1B2C3D42E90000200000007 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A1B2C3D42E90000200000002 /* LocoloTests */,
+			);
+			name = LocoloTests;
+			packageProductDependencies = (
+			);
+			productName = LocoloTests;
+			productReference = A1B2C3D42E90000200000001 /* LocoloTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		D443D0712EC5C218007625BE /* LocoloNotificationService */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = D443D0782EC5C218007625BE /* Build configuration list for PBXNativeTarget "LocoloNotificationService" */;
@@ -160,8 +193,8 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				D443D0732EC5C218007625BE /* LocoloNotificationService */,
 				A1B2C3D42E90000200000002 /* LocoloTests */,
+				D443D0732EC5C218007625BE /* LocoloNotificationService */,
 			);
 			name = LocoloNotificationService;
 			packageProductDependencies = (
@@ -206,48 +239,7 @@
 			productReference = D4A669C92E799B570058194E /* Locolo.app */;
 			productType = "com.apple.product-type.application";
 		};
-		A1B2C3D42E90000200000006 /* LocoloTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = A1B2C3D42E9000020000000A /* Build configuration list for PBXNativeTarget "LocoloTests" */;
-			buildPhases = (
-				A1B2C3D42E90000200000004 /* Sources */,
-				A1B2C3D42E90000200000003 /* Frameworks */,
-				A1B2C3D42E90000200000005 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				A1B2C3D42E90000200000007 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				A1B2C3D42E90000200000002 /* LocoloTests */,
-			);
-			name = LocoloTests;
-			packageProductDependencies = (
-			);
-			productName = LocoloTests;
-			productReference = A1B2C3D42E90000200000001 /* LocoloTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
 /* End PBXNativeTarget section */
-
-/* Begin PBXContainerItemProxy section */
-		A1B2C3D42E90000200000008 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = D4A669C12E799B570058194E /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = D4A669C82E799B570058194E;
-			remoteInfo = Locolo;
-		};
-/* End PBXContainerItemProxy section */
-
-/* Begin PBXTargetDependency section */
-		A1B2C3D42E90000200000007 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = D4A669C82E799B570058194E /* Locolo */;
-			targetProxy = A1B2C3D42E90000200000008 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		D4A669C12E799B570058194E /* Project object */ = {
@@ -257,15 +249,15 @@
 				LastSwiftUpdateCheck = 1640;
 				LastUpgradeCheck = 1640;
 				TargetAttributes = {
+					A1B2C3D42E90000200000006 = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = D4A669C82E799B570058194E;
+					};
 					D443D0712EC5C218007625BE = {
 						CreatedOnToolsVersion = 16.4;
 					};
 					D4A669C82E799B570058194E = {
 						CreatedOnToolsVersion = 16.4;
-					};
-					A1B2C3D42E90000200000006 = {
-						CreatedOnToolsVersion = 16.4;
-						TestTargetID = D4A669C82E799B570058194E;
 					};
 				};
 			};
@@ -296,6 +288,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A1B2C3D42E90000200000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D443D0702EC5C218007625BE /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -310,16 +309,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		A1B2C3D42E90000200000005 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1B2C3D42E90000200000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-/* End PBXResourcesBuildPhase section */
-
-/* Begin PBXSourcesBuildPhase section */
 		D443D06E2EC5C218007625BE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -335,16 +334,53 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		A1B2C3D42E90000200000004 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		A1B2C3D42E90000200000007 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D4A669C82E799B570058194E /* Locolo */;
+			targetProxy = A1B2C3D42E90000200000008 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		A1B2C3D42E9000020000000B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RB24MJ38LB;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.apram.locolo.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Locolo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Locolo";
+			};
+			name = Debug;
+		};
+		A1B2C3D42E9000020000000C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RB24MJ38LB;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.apram.locolo.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Locolo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Locolo";
+			};
+			name = Release;
+		};
 		D443D0792EC5C218007625BE /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -527,6 +563,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Locolo/Locolo.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -535,6 +572,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Locolo/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Locolo adds events you choose to your calendar.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "Locolo adds events you choose to your calendar.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Locolo uses your camera to place and capture AR experiences around you.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Locolo uses your location in the background to alert you when AR art is nearby, even if the app is closed.";
 				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Locolo uses your location to find AR art near you and keep nearby alerts accurate.";
@@ -568,14 +607,17 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Locolo/Locolo.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = MDUMW2CFXU;
+				DEVELOPMENT_TEAM = RB24MJ38LB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Locolo/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Locolo adds events you choose to your calendar.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "Locolo adds events you choose to your calendar.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Locolo uses your camera to place and capture AR experiences around you.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Locolo uses your location in the background to alert you when AR art is nearby, even if the app is closed.";
 				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Locolo uses your location to find AR art near you and keep nearby alerts accurate.";
@@ -595,7 +637,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				NEW_SETTING = "";
-				PRODUCT_BUNDLE_IDENTIFIER = edu.monash.Locolo;
+				PRODUCT_BUNDLE_IDENTIFIER = com.apram.locolo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -604,45 +646,18 @@
 			};
 			name = Release;
 		};
-		A1B2C3D42E9000020000000B /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = RB24MJ38LB;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.apram.locolo.tests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Locolo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Locolo";
-			};
-			name = Debug;
-		};
-		A1B2C3D42E9000020000000C /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = RB24MJ38LB;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.apram.locolo.tests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Locolo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Locolo";
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A1B2C3D42E9000020000000A /* Build configuration list for PBXNativeTarget "LocoloTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3D42E9000020000000B /* Debug */,
+				A1B2C3D42E9000020000000C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		D443D0782EC5C218007625BE /* Build configuration list for PBXNativeTarget "LocoloNotificationService" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -666,15 +681,6 @@
 			buildConfigurations = (
 				D4A669D52E799B590058194E /* Debug */,
 				D4A669D62E799B590058194E /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A1B2C3D42E9000020000000A /* Build configuration list for PBXNativeTarget "LocoloTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A1B2C3D42E9000020000000B /* Debug */,
-				A1B2C3D42E9000020000000C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -709,6 +715,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A1B2C3D42E90000100000002 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
+		};
+		A1B2C3D42E90000100000004 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
+		};
 		D456D9CA2EB1A52E00506516 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
@@ -733,16 +749,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseStorage;
-		};
-		A1B2C3D42E90000100000002 /* FirebaseCrashlytics */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseCrashlytics;
-		};
-		A1B2C3D42E90000100000004 /* FirebaseAnalytics */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = D456D9C92EB1A52E00506516 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseAnalytics;
 		};
 		D456D9D52EB1A5BA00506516 /* MessageKit */ = {
 			isa = XCSwiftPackageProductDependency;

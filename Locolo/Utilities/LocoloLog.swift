@@ -18,6 +18,7 @@ enum LocoloLog {
     static let chat = Logger(subsystem: subsystem, category: "chat")
     static let mint = Logger(subsystem: subsystem, category: "mint")
     static let general = Logger(subsystem: subsystem, category: "general")
+    static let auth = Logger(subsystem: subsystem, category: "auth")
 
     /// Debug-only convenience that strips in release builds.
     static func debug(_ logger: Logger = general, _ message: String) {

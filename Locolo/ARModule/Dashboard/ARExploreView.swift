@@ -25,6 +25,9 @@ struct ARExploreView: View {
     @State private var commentsAsset: DigitalAsset?
     @State private var featuredPage = 0
     @State private var showImmersiveFeed = false
+    @State private var showComposer = false
+    @ObservedObject private var posts = PostStore.shared
+    @ObservedObject private var memories = MemoryStore.shared
 
     var body: some View {
         ZStack {
@@ -46,6 +49,7 @@ struct ARExploreView: View {
                     } else {
                         VStack(spacing: 0) {
                             StoryRailView()
+                            memoriesRail
                             featuredSection
                             exploreRailsSection
                             suggestedCreatorsSection
@@ -61,19 +65,25 @@ struct ARExploreView: View {
                     async let storiesReload: Void = stories.refresh()
                     async let presenceReload: Void = presence.refreshNearby()
                     async let eventsReload: Void = events.refresh()
-                    _ = await (feed, followsReload, activityReload, storiesReload, presenceReload, eventsReload)
+                    async let postsReload: Void = posts.refreshFeed()
+                    async let memoriesReload: Void = memories.refreshFeed()
+                    _ = await (feed, followsReload, activityReload, storiesReload, presenceReload, eventsReload,
+                               postsReload, memoriesReload)
                     await presence.heartbeat()
                 }
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            ARGlassHeader(title: "AR World", subtitle: "Shared Creative Space", onExit: onDismiss) {
+            ARGlassHeader(title: "Loco AR", subtitle: "Shared Creative Space", onExit: onDismiss) {
                 HStack(spacing: 8) {
                     ARHeaderIconButton(icon: "arkit", label: "Open AR viewer") {
                         dashboardState.path.append(.viewer)
                     }
                     ARBadgedIconButton(icon: "bell", label: "Activity", badge: activity.unreadCount) {
                         dashboardState.path.append(.activity)
+                    }
+                    ARHeaderIconButton(icon: "square.and.pencil", label: "New post") {
+                        showComposer = true
                     }
                     ARBadgedIconButton(icon: "paperplane", label: "Messages", badge: inbox.unreadCount) {
                         dashboardState.path.append(.conversations)
@@ -105,6 +115,12 @@ struct ARExploreView: View {
         }
         .sheet(item: $commentsAsset) { asset in
             CommentsSheet(asset: asset, onOpenProfile: { openProfile($0) })
+        }
+        .sheet(isPresented: $showComposer) { PostComposerView() }
+        .task {
+            async let p: Void = posts.refreshFeed()
+            async let m: Void = memories.refreshFeed()
+            _ = await (p, m)
         }
         .fullScreenCover(isPresented: $showImmersiveFeed) {
             ImmersiveFeedView(
@@ -227,7 +243,7 @@ struct ARExploreView: View {
             .padding(16)
         }
         .scrollDisabled(true)
-        .accessibilityLabel("Loading AR World")
+        .accessibilityLabel("Loading Loco AR")
     }
 
     // MARK: - Suggested creators
@@ -327,16 +343,17 @@ struct ARExploreView: View {
                 Spacer(minLength: 0)
                 Button {
                     ARHaptics.tick()
-                    showImmersiveFeed = true
+                    // Swipe = Reels of memories captured WITH assets (V3).
+                    dashboardState.path.append(.memoriesFeed(startAt: nil))
                 } label: {
-                    Label("Swipe", systemImage: "rectangle.stack.fill")
+                    Label("Reels", systemImage: "play.rectangle.on.rectangle.fill")
                         .font(.caption.weight(.bold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(Capsule().fill(AppColors.purplePinkGradient))
                 }
-                .accessibilityLabel("Open immersive For You feed")
+                .accessibilityLabel("Open Reels of AR memories")
                 .padding(.top, 24)
             }
             .padding(.horizontal, 16)
@@ -364,8 +381,16 @@ struct ARExploreView: View {
                     )
                 }
             } else {
-                LazyVStack(spacing: 16) {
-                    ForEach(vm.visibleFeed) { asset in
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(vm.visibleFeed.enumerated()), id: \.element.id) { index, asset in
+                        // Every 4th slot: a user post, Instagram-style mixed feed.
+                        if index > 0, index % 4 == 0, let post = postForSlot(index / 4 - 1) {
+                            PostCard(post: post,
+                                     onOpenProfile: { openProfile($0) },
+                                     onOpenLink: openPostLink)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                        }
                         ARSocialAssetCard(
                             asset: asset,
                             creator: vm.creator(for: asset),
@@ -375,7 +400,6 @@ struct ARExploreView: View {
                             onOpen: { selectedAsset = asset },
                             onOpenComments: { commentsAsset = asset }
                         )
-                        .padding(.horizontal, 16)
                         .onAppear { vm.loadMoreIfNeeded(current: asset) }
                     }
 
@@ -386,6 +410,50 @@ struct ARExploreView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Memories rail (snap-story style → opens Reels)
+
+    @ViewBuilder
+    private var memoriesRail: some View {
+        if !memories.feed.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Memories", systemImage: "camera.aperture")
+                        .font(.headline)
+                    Spacer()
+                    Button("See all") { dashboardState.path.append(.memoriesFeed(startAt: nil)) }
+                        .font(.caption.weight(.semibold))
+                }
+                .padding(.horizontal, 16)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(memories.feed.prefix(15)) { memory in
+                            Button { dashboardState.path.append(.memoriesFeed(startAt: memory.id)) } label: {
+                                MemoryBubble(memory: memory, width: 84)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+            .padding(.vertical, 10)
+        }
+    }
+
+    private func postForSlot(_ slot: Int) -> UserPost? {
+        let list = posts.feed
+        return list.indices.contains(slot) ? list[slot] : nil
+    }
+
+    private func openPostLink(_ link: PostLink) {
+        switch link {
+        case .post(let id): dashboardState.path.append(.post(postId: id))
+        case .memory(let id): dashboardState.path.append(.memory(memoryId: id))
+        case .asset(let id):
+            Task { selectedAsset = await DigitalAssetRepository().fetchAsset(id: id) }
         }
     }
 

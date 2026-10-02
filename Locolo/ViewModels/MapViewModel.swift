@@ -19,6 +19,8 @@ final class MapViewModel: NSObject, ObservableObject, CLLocationManagerDelegate 
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var zoomLevel: Double = 10
+    /// First GPS fix — the Nearby tab frames a 5 km square around it once.
+    @Published var userCoordinate: CLLocationCoordinate2D?
 
     private let client = SupabaseManager.shared.client
     private let locationManager = CLLocationManager()
@@ -56,8 +58,16 @@ final class MapViewModel: NSObject, ObservableObject, CLLocationManagerDelegate 
         
         // Update region but don't trigger fetch here - let zoom/pan handle it
         region.center = location.coordinate
+        userCoordinate = location.coordinate
     }
     
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        // First launch: permission arrives after requestLocation() bailed out.
+        if [.authorizedWhenInUse, .authorizedAlways].contains(manager.authorizationStatus), userCoordinate == nil {
+            manager.requestLocation()
+        }
+    }
+
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print(" Location error: \(error.localizedDescription)")
         errorMessage = "Failed to get location: \(error.localizedDescription)"

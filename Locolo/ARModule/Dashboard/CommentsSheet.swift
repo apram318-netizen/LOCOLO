@@ -30,6 +30,8 @@ struct CommentsSheet: View {
     @State private var pendingDelete: AssetComment?
     @State private var reportedToast = false
     @State private var replyTo: AssetComment?
+    /// On-device NaturalLanguage sentiment nudge — never blocks, just asks.
+    @State private var harshConfirmed = false
     @FocusState private var composerFocused: Bool
 
     private static let quickReactions = ["🔥", "😍", "👏", "🤯", "✨", "💜"]
@@ -432,6 +434,13 @@ struct CommentsSheet: View {
 
     private func post() async {
         guard let me, !trimmedDraft.isEmpty, !isPosting else { return }
+        if !harshConfirmed && SmartSuggestions.looksHarsh(trimmedDraft) {
+            harshConfirmed = true
+            banner = "This might come across as harsh. Tap send again to post it anyway."
+            ARHaptics.warning()
+            return
+        }
+        harshConfirmed = false
         isPosting = true
         banner = nil
         defer { isPosting = false }

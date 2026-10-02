@@ -2,344 +2,432 @@
 //  AssetSceneView.swift
 //  Locolo
 //
-
+//  Interactive 3D preview for an asset (detail sheet hero, settings sheet).
+//
+//  V3 rewrite (feedback: "too zoomed in", "black background"):
+//  * The SceneKit view is transparent; the backdrop is a SwiftUI aurora
+//    (`AssetStageBackground`) tinted from the asset's thumbnail, so every
+//    asset gets its own colourway instead of a black void.
+//  * The camera is FITTED to the model's bounding sphere with padding, so
+//    tall, wide and tiny models all sit fully in frame.
+//  * Drag to orbit, pinch to zoom (clamped), double-tap to reset; a slow
+//    turntable spin runs until the user touches it.
+//  * Models come from MediaCache (no re-download per open), with a progress
+//    ring while loading and a friendly fallback if the file can't be read.
+//
 
 import Foundation
 import SwiftUI
 import SceneKit
 import UIKit
 
-struct AssetSceneView: UIViewRepresentable {
+struct AssetSceneView: View {
     let asset: DigitalAsset
-    
+    /// Extra breathing room around the model (1 = tight fit).
+    var framing: Float = 1.45
+
+    @State private var phase: LoadPhase = .loading
+    @State private var tint: [Color] = AssetStageBackground.defaultPalette
+
+    enum LoadPhase: Equatable { case loading, ready, failed }
+
+    var body: some View {
+        ZStack {
+            AssetStageBackground(palette: tint)
+
+            AssetSceneRepresentable(asset: asset, framing: framing, phase: $phase)
+
+            switch phase {
+            case .loading:
+                VStack(spacing: 10) {
+                    ProgressView().tint(.white)
+                    Text("Loading 3D model…")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+                .transition(.opacity)
+            case .failed:
+                VStack(spacing: 10) {
+                    AssetThumbnailView(asset: asset, cornerRadius: 18)
+                        .frame(width: 160, height: 160)
+                        .shadow(color: .black.opacity(0.35), radius: 18, y: 10)
+                    Text("3D preview unavailable")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+            case .ready:
+                EmptyView()
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: phase)
+        .task(id: asset.id) {
+            if let colors = await AssetStageBackground.palette(for: asset) {
+                withAnimation(.easeInOut(duration: 0.6)) { tint = colors }
+            }
+        }
+    }
+}
+
+// MARK: - Backdrop
+
+/// Soft studio backdrop: a deep gradient, two drifting colour blooms taken
+/// from the asset's thumbnail, a horizon glow and a floor reflection.
+struct AssetStageBackground: View {
+    var palette: [Color]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var drift = false
+
+    static let defaultPalette: [Color] = [Color(hex: "8B5CF6"), Color(hex: "EC4899"), Color(hex: "22D3EE")]
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            ZStack {
+                LinearGradient(colors: [Color(hex: "120B24"), Color(hex: "1C1236"), Color(hex: "0B0716")],
+                               startPoint: .top, endPoint: .bottom)
+                Circle()
+                    .fill(palette[0].opacity(0.55))
+                    .frame(width: w * 0.9)
+                    .blur(radius: 70)
+                    .offset(x: drift ? -w * 0.22 : -w * 0.32, y: -h * 0.18)
+                Circle()
+                    .fill(palette[min(1, palette.count - 1)].opacity(0.42))
+                    .frame(width: w * 0.8)
+                    .blur(radius: 80)
+                    .offset(x: drift ? w * 0.30 : w * 0.20, y: h * 0.02)
+                Ellipse()
+                    .fill(palette[min(2, palette.count - 1)].opacity(0.30))
+                    .frame(width: w * 1.1, height: h * 0.22)
+                    .blur(radius: 40)
+                    .offset(y: h * 0.36)
+                // Floor: a faint perspective grid fading into the horizon.
+                FloorGrid()
+                    .stroke(Color.white.opacity(0.07), lineWidth: 0.8)
+                    .frame(height: h * 0.34)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .mask(LinearGradient(colors: [.clear, .white], startPoint: .top, endPoint: .bottom))
+            }
+            .frame(width: w, height: h)
+            .clipped()
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 7).repeatForever(autoreverses: true)) { drift = true }
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// Two-to-three dominant colours from the asset's thumbnail.
+    static func palette(for asset: DigitalAsset) async -> [Color]? {
+        let image: UIImage?
+        if let s = asset.thumbUrl, let url = URL(string: s),
+           let (data, _) = try? await URLSession.shared.data(from: url) {
+            image = UIImage(data: data)
+        } else {
+            image = await AssetThumbnailGenerator.thumbnail(for: asset)
+        }
+        guard let image else { return nil }
+        let colors = image.locoloDominantColors(count: 3)
+        return colors.isEmpty ? nil : colors.map { Color(uiColor: $0.locoloVivid()) }
+    }
+}
+
+private struct FloorGrid: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let vanish = CGPoint(x: rect.midX, y: rect.minY - rect.height * 0.6)
+        for i in -8...8 {
+            let x = rect.midX + CGFloat(i) * rect.width / 8
+            p.move(to: CGPoint(x: x, y: rect.maxY))
+            p.addLine(to: vanish)
+        }
+        for i in 1...6 {
+            let t = pow(CGFloat(i) / 6, 1.8)
+            let y = rect.minY + rect.height * t
+            p.move(to: CGPoint(x: rect.minX, y: y))
+            p.addLine(to: CGPoint(x: rect.maxX, y: y))
+        }
+        return p
+    }
+}
+
+// MARK: - SceneKit
+
+private struct AssetSceneRepresentable: UIViewRepresentable {
+    let asset: DigitalAsset
+    let framing: Float
+    @Binding var phase: AssetSceneView.LoadPhase
+
+    func makeCoordinator() -> Coordinator { Coordinator(phase: $phase) }
+
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
-        view.backgroundColor = .black   // I forced dark mode here because this screen only makes sense black and blends better too
-        
-        // make my whole scene
-        let scene = makeScene()
-        view.scene = scene
-        
-        view.autoenablesDefaultLighting = false  // I decided to do my own lights
-        view.allowsCameraControl = false         // user not moving camera, allowing camera was feeling too dizzy
-        view.rendersContinuously = true
+        view.backgroundColor = .clear
+        view.isOpaque = false
         view.antialiasingMode = .multisampling4X
-        
+        view.preferredFramesPerSecond = 60
+        view.rendersContinuously = false
+        view.autoenablesDefaultLighting = false
+        view.allowsCameraControl = false   // custom orbit below: clamped + resettable
+
+        let scene = SCNScene()
+        scene.background.contents = UIColor.clear
+        // Image-based lighting gives PBR models real reflections instead of
+        // the flat, dim look of a few omni lights.
+        scene.lightingEnvironment.contents = Self.studioEnvironment()
+        scene.lightingEnvironment.intensity = 1.4
+        view.scene = scene
+
+        context.coordinator.install(in: view, framing: framing)
+        context.coordinator.load(asset: asset)
         return view
     }
-    
+
     func updateUIView(_ uiView: SCNView, context: Context) {}
-}
 
-//
-// MARK: - building the scene
-//
-extension AssetSceneView {
-    
-    private func makeScene() -> SCNScene {
-        let scene = SCNScene()
-        
-        // I add everything layer by layer
-        addBackdropPlane(to: scene)     // background wall image
-        setupCamera(in: scene)          // camera
-        addCinematicLights(to: scene)   // small dim lights
-        addDeepFog(to: scene)           // distance fog
-        addGroundShadow(to: scene)      // fake floor shadow
-        addBottomFog(to: scene)         // my fog PNG drifting
-        loadModel(into: scene)          // actual asset
-        
-        return scene
+    static func dismantleUIView(_ uiView: SCNView, coordinator: Coordinator) {
+        coordinator.cancel()
     }
-    
-    
-    // MARK: - background wall
-    private func addBackdropPlane(to scene: SCNScene) {
-        guard let texture = UIImage(named: "local_bg") else {
-            print("missing local_bg")
-            return
+
+    /// A soft gradient "studio" used as the lighting environment.
+    private static func studioEnvironment() -> UIImage {
+        let size = CGSize(width: 256, height: 128)
+        return UIGraphicsImageRenderer(size: size).image { ctx in
+            let colors = [UIColor(white: 1.0, alpha: 1).cgColor,
+                          UIColor(white: 0.55, alpha: 1).cgColor,
+                          UIColor(white: 0.18, alpha: 1).cgColor] as CFArray
+            let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.45, 1])!
+            ctx.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: size.height), options: [])
         }
-        
-        // big rectangle behind everything
-        let plane = SCNPlane(width: 35, height: 22)
-        let mat = SCNMaterial()
-        
-        mat.diffuse.contents = texture
-        mat.lightingModel = .constant
-        mat.diffuse.wrapS = .clamp
-        mat.diffuse.wrapT = .clamp
-        
-        // I darken it a bit to blend better
-        mat.multiply.contents = UIColor(white: 0.55, alpha: 1)
-        
-        plane.materials = [mat]
-        
-        let node = SCNNode(geometry: plane)
-        node.position = SCNVector3(0, 2.3, -14)
-        
-        scene.rootNode.addChildNode(node)
     }
-    
-    
-    // MARK: - camera
-    private func setupCamera(in scene: SCNScene) {
-        let cameraNode = SCNNode()
-        cameraNode.name = "mainCamera"
-        
-        let cam = SCNCamera()
-        cam.fieldOfView = 36
-        cam.zFar = 700
-        cam.wantsHDR = true
-        cam.exposureOffset = -0.1
-        
-        // I give some soft blur for depth
-        cam.wantsDepthOfField = true
-        cam.fStop = 16
-        cam.focalBlurRadius = 3
-        
-        cameraNode.camera = cam
-        cameraNode.position = SCNVector3(0, 1.35, 12.5)  // I moved closer
-        
-        scene.rootNode.addChildNode(cameraNode)
-    }
-    
-    
-    // MARK: - lights
-    private func addCinematicLights(to scene: SCNScene) {
-        // ambient light
-        let amb = SCNLight()
-        amb.type = .ambient
-        amb.color = UIColor(white: 0.10, alpha: 1)
-        let ambNode = SCNNode()
-        ambNode.light = amb
-        scene.rootNode.addChildNode(ambNode)
-        
-        // key light
-        let key = SCNLight()
-        key.type = .omni
-        key.intensity = 100
-        key.color = UIColor(white: 0.88, alpha: 1)
-        let keyNode = SCNNode()
-        keyNode.position = SCNVector3(3, 3.2, 9)
-        scene.rootNode.addChildNode(keyNode)
-        
-        // back light
-        let back = SCNLight()
-        back.type = .omni
-        back.intensity = 170
-        back.color = UIColor(white: 0.32, alpha: 1)
-        let backNode = SCNNode()
-        backNode.position = SCNVector3(-4, 4.8, -8)
-        scene.rootNode.addChildNode(backNode)
-        
-        // fill light
-        let fill = SCNLight()
-        fill.type = .omni
-        fill.intensity = 40
-        fill.color = UIColor(white: 0.22, alpha: 1)
-        let fillNode = SCNNode()
-        fillNode.position = SCNVector3(0, 1.2, 6)
-        scene.rootNode.addChildNode(fillNode)
-    }
-    
-    
-    // MARK: - built-in SceneKit fog
-    private func addDeepFog(to scene: SCNScene) {
-        scene.fogStartDistance = 3.5    // fog starts close
-        scene.fogEndDistance = 20       // full fog
-        scene.fogDensityExponent = 1.55
-        
-        scene.fogColor = UIColor.black.withAlphaComponent(0.95)
-    }
-    
-    
-    // MARK: - fake shadow plane
-    private func addGroundShadow(to scene: SCNScene) {
-        let plane = SCNPlane(width: 10, height: 10)
-        
-        let mat = SCNMaterial()
-        mat.diffuse.contents = radialShadowImage(size: CGSize(width: 900, height: 900))
-        mat.isDoubleSided = true
-        mat.blendMode = .alpha
-        mat.lightingModel = .constant
-        
-        plane.materials = [mat]
-        
-        let node = SCNNode(geometry: plane)
-        
-        // I move it down and forward
-        node.position = SCNVector3(0, -1.5, 2.5)
-        node.scale = SCNVector3(1.6, 1.6, 1)
-        node.eulerAngles.x = -.pi / 2
-        
-        scene.rootNode.addChildNode(node)
-    }
-    
-    
-    // simple radial shadow
-    private func radialShadowImage(size: CGSize) -> UIImage {
-        UIGraphicsBeginImageContextWithOptions(size, false, 0)
-        let ctx = UIGraphicsGetCurrentContext()!
-        
-        let gradient = CGGradient(
-            colorsSpace: CGColorSpaceCreateDeviceRGB(),
-            colors: [
-                UIColor.black.withAlphaComponent(0.24).cgColor,
-                UIColor.black.withAlphaComponent(0).cgColor
-            ] as CFArray,
-            locations: [0, 1]
-        )!
-        
-        let c = CGPoint(x: size.width/2, y: size.height/2)
-        ctx.drawRadialGradient(gradient, startCenter: c, startRadius: 0,
-                               endCenter: c, endRadius: size.width/2,
-                               options: [])
-        
-        let img = UIGraphicsGetImageFromCurrentImageContext()!
-        UIGraphicsEndImageContext()
-        return img
-    }
-    
-    
-    // MARK: - load model
-    private func loadModel(into scene: SCNScene) {
-        guard let url = URL(string: asset.fileUrl) else {
-            addFallbackCube(to: scene)
-            return
+
+    final class Coordinator: NSObject {
+        private var phase: Binding<AssetSceneView.LoadPhase>
+        private weak var view: SCNView?
+        private let pivot = SCNNode()        // yaw
+        private let tilt = SCNNode()         // pitch
+        private let cameraNode = SCNNode()
+        private var framing: Float = 1.45
+        private var fitDistance: Float = 4
+        private var distance: Float = 4
+        private var yaw: Float = 0
+        private var pitch: Float = -0.12
+        private var loadTask: Task<Void, Never>?
+
+        init(phase: Binding<AssetSceneView.LoadPhase>) {
+            self.phase = phase
         }
-        
-        Task {
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                let temp = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(UUID().uuidString + ".usdz")
-                try data.write(to: temp)
-                
-                guard let refNode = SCNReferenceNode(url: temp) else {
-                    await MainActor.run { addFallbackCube(to: scene) }
-                    return
+
+        func install(in view: SCNView, framing: Float) {
+            self.view = view
+            self.framing = framing
+            guard let root = view.scene?.rootNode else { return }
+
+            let camera = SCNCamera()
+            camera.fieldOfView = 38
+            camera.zNear = 0.01
+            camera.zFar = 200
+            camera.wantsHDR = true
+            camera.bloomIntensity = 0.25
+            camera.bloomThreshold = 0.9
+            cameraNode.camera = camera
+            root.addChildNode(pivot)
+            pivot.addChildNode(tilt)
+            tilt.addChildNode(cameraNode)
+            view.pointOfView = cameraNode
+
+            // Key + rim lights on top of the environment.
+            let key = SCNLight()
+            key.type = .directional
+            key.intensity = 900
+            key.castsShadow = true
+            key.shadowMode = .deferred
+            key.shadowColor = UIColor.black.withAlphaComponent(0.45)
+            key.shadowRadius = 8
+            let keyNode = SCNNode()
+            keyNode.light = key
+            keyNode.eulerAngles = SCNVector3(-Float.pi / 3, Float.pi / 5, 0)
+            root.addChildNode(keyNode)
+
+            let rim = SCNLight()
+            rim.type = .directional
+            rim.intensity = 450
+            rim.color = UIColor(red: 0.75, green: 0.65, blue: 1.0, alpha: 1)
+            let rimNode = SCNNode()
+            rimNode.light = rim
+            rimNode.eulerAngles = SCNVector3(-Float.pi / 6, Float.pi, 0)
+            root.addChildNode(rimNode)
+
+            let ambient = SCNLight()
+            ambient.type = .ambient
+            ambient.intensity = 180
+            let ambientNode = SCNNode()
+            ambientNode.light = ambient
+            root.addChildNode(ambientNode)
+
+            view.addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(pan(_:))))
+            view.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinch(_:))))
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(reset))
+            doubleTap.numberOfTapsRequired = 2
+            view.addGestureRecognizer(doubleTap)
+            applyCamera()
+        }
+
+        func cancel() { loadTask?.cancel() }
+
+        func load(asset: DigitalAsset) {
+            guard let remote = URL(string: asset.fileUrl) else { fail(); return }
+            loadTask = Task { [weak self] in
+                let local: URL
+                if let cached = MediaCache.shared.localURL(forRemoteURL: remote) {
+                    local = cached
+                } else {
+                    guard let (data, _) = try? await URLSession.shared.data(from: remote),
+                          let stored = MediaCache.shared.store(data: data, for: remote, fileExtension: "usdz")
+                    else { await MainActor.run { self?.fail() }; return }
+                    local = stored
                 }
-                
-                refNode.load()
-                
-                // get bounds and scale properly
-                let (center, radius) = refNode.boundingSphere
-                let safeRadius = max(radius, 0.001)
-                
-                let desired: Float = 1.1
-                let scale = desired / safeRadius
-                refNode.scale = SCNVector3(scale, scale, scale)
-                
-                let cent = SCNVector3(center.x * scale,
-                                      center.y * scale,
-                                      center.z * scale)
-                
-                // I reposition the model nicely
-                let pos = SCNVector3(-cent.x, -cent.y + 1.15, -cent.z)
-                
-                await MainActor.run {
-                    let rot = SCNNode()
-                    rot.position = pos
-                    scene.rootNode.addChildNode(rot)
-                    
-                    rot.addChildNode(refNode)
-                    animateEntrance(refNode)
-                    startRotation(on: rot)
-                }
-                
-            } catch {
-                print("load error:", error)
-                await MainActor.run { addFallbackCube(to: scene) }
+                guard !Task.isCancelled else { return }
+                // SCNScene(url:) parses off the main thread.
+                let modelScene = try? SCNScene(url: local, options: [.checkConsistency: false])
+                await MainActor.run { self?.present(modelScene) }
             }
         }
-    }
-    
-    
-    // fallback block
-    private func addFallbackCube(to scene: SCNScene) {
-        let box = SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0.2)
-        box.firstMaterial?.diffuse.contents = UIColor.red
-        let node = SCNNode(geometry: box)
-        node.position = SCNVector3(0, 0.6, 0)
-        scene.rootNode.addChildNode(node)
-    }
-    
-    
-    // entrance fade + slide
-    private func animateEntrance(_ node: SCNNode) {
-        node.opacity = 0
-        node.position.y -= 0.25
-        
-        node.runAction(
-            .group([
-                .fadeIn(duration: 0.9),
-                .moveBy(x: 0, y: 0.25, z: 0, duration: 0.9)
-            ])
-        )
-    }
-    
-    
-    // slow rotation
-    private func startRotation(on node: SCNNode) {
-        let spin = SCNAction.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 20)
-        node.runAction(.repeatForever(spin))
-    }
-    
-    
-    // MARK: - bottom drifting fog PNG
-    private func addBottomFog(to scene: SCNScene) {
-        DispatchQueue.main.async {
-            
-            guard let fogImg = UIImage(named: "fog_1") else {
-                print("missing fog_1")
-                return
+
+        private func fail() {
+            phase.wrappedValue = .failed
+        }
+
+        @MainActor
+        private func present(_ modelScene: SCNScene?) {
+            guard let modelScene, let root = view?.scene?.rootNode else { fail(); return }
+            let container = SCNNode()
+            for child in modelScene.rootNode.childNodes { container.addChildNode(child) }
+
+            // Fit: centre on the bounding box, rest on the floor, scale so the
+            // bounding sphere has radius 1 → camera distance is model-agnostic.
+            let (minB, maxB) = container.boundingBox
+            let size = SCNVector3(maxB.x - minB.x, maxB.y - minB.y, maxB.z - minB.z)
+            let radius = max(0.0001, sqrt(size.x * size.x + size.y * size.y + size.z * size.z) / 2)
+            let scale = 1 / radius
+            container.scale = SCNVector3(scale, scale, scale)
+            container.position = SCNVector3(-(minB.x + size.x / 2) * scale,
+                                            -(minB.y + size.y / 2) * scale,
+                                            -(minB.z + size.z / 2) * scale)
+
+            let floorY = -size.y / 2 * scale
+            root.addChildNode(Self.shadowCatcher(at: floorY))
+
+            let turntable = SCNNode()
+            turntable.name = "turntable"
+            turntable.addChildNode(container)
+            root.addChildNode(turntable)
+
+            // Distance so a unit sphere fills the vertical FOV, plus framing.
+            let fov = Float((cameraNode.camera?.fieldOfView ?? 38) * .pi / 180)
+            fitDistance = (1 / sin(fov / 2)) * framing
+            distance = fitDistance
+            applyCamera()
+
+            container.opacity = 0
+            container.runAction(.fadeIn(duration: 0.5))
+            if !UIAccessibility.isReduceMotionEnabled {
+                turntable.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 24)), forKey: "spin")
             }
-            
-            let fogPlane = SCNPlane(width: 14, height: 5)
-            let mat = SCNMaterial()
-            
-            mat.diffuse.contents = fogImg
-            mat.transparency = 0.85
-            mat.blendMode = .add
-            mat.isDoubleSided = true
-            mat.lightingModel = .constant
-            mat.writesToDepthBuffer = false
-            mat.readsFromDepthBuffer = false
-            
-            fogPlane.materials = [mat]
-            
-            let fogNode = SCNNode(geometry: fogPlane)
-            fogNode.name = "fogNode"
-            
-            // I placed fog low and a bit front
-            fogNode.position = SCNVector3(0, -1.5, 2.5)
-            fogNode.eulerAngles.x = -.pi / 2
-            
-            scene.rootNode.addChildNode(fogNode)
-            
-            // left-right drifting animation
-            let moveRight = SCNAction.moveBy(x: 0.5, y: 0, z: 0, duration: 5)
-            let moveLeft = moveRight.reversed()
-            let seq = SCNAction.sequence([moveRight, moveLeft])
-            
-            fogNode.runAction(.repeatForever(seq))
+            // Play any embedded animation so animated drops feel alive.
+            container.enumerateChildNodes { node, _ in
+                for key in node.animationKeys { node.animationPlayer(forKey: key)?.play() }
+            }
+            view?.rendersContinuously = true
+            phase.wrappedValue = .ready
+        }
+
+        /// Invisible floor that only receives the model's shadow.
+        private static func shadowCatcher(at y: Float) -> SCNNode {
+            let plane = SCNFloor()
+            plane.reflectivity = 0
+            let m = SCNMaterial()
+            m.lightingModel = .shadowOnly
+            m.diffuse.contents = UIColor.clear
+            plane.materials = [m]
+            let node = SCNNode(geometry: plane)
+            node.position = SCNVector3(0, y, 0)
+            return node
+        }
+
+        private func applyCamera() {
+            pivot.eulerAngles.y = yaw
+            tilt.eulerAngles.x = pitch
+            cameraNode.position = SCNVector3(0, 0, distance)
+        }
+
+        private func stopSpin() {
+            view?.scene?.rootNode.childNode(withName: "turntable", recursively: false)?
+                .removeAction(forKey: "spin")
+        }
+
+        @objc private func pan(_ g: UIPanGestureRecognizer) {
+            stopSpin()
+            let t = g.translation(in: g.view)
+            g.setTranslation(.zero, in: g.view)
+            yaw -= Float(t.x) * 0.008
+            pitch = min(0.35, max(-1.1, pitch - Float(t.y) * 0.006))
+            applyCamera()
+        }
+
+        @objc private func pinch(_ g: UIPinchGestureRecognizer) {
+            stopSpin()
+            distance = min(fitDistance * 2.2, max(fitDistance * 0.45, distance / Float(g.scale)))
+            g.scale = 1
+            applyCamera()
+        }
+
+        @objc private func reset() {
+            SCNTransaction.begin()
+            SCNTransaction.animationDuration = 0.45
+            yaw = 0
+            pitch = -0.12
+            distance = fitDistance
+            applyCamera()
+            SCNTransaction.commit()
         }
     }
 }
 
+// MARK: - Colour helpers
 
-// https://youtu.be/Jr9OduLBd5A?si=-TUzU6tOQ77lxoGW // This tutorial series is nice, however this included a lot of unneccessary things as well and wasnt for the swift UI but still it helped me to grab the scene kit concepts well. It just gets better by video 4 only
-// https://developer.apple.com/documentation/scenekit
-// https://developer.apple.com/documentation/scenekit/scncamera
-// https://developer.apple.com/documentation/scenekit/scnlight Lights are actually documented well and worked too
+extension UIImage {
+    /// Cheap dominant colours: downsample to 24×24 and bucket hues.
+    func locoloDominantColors(count: Int) -> [UIColor] {
+        let side = 24
+        guard let cg = cgImage else { return [] }
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        guard let ctx = CGContext(data: &pixels, width: side, height: side, bitsPerComponent: 8,
+                                  bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return [] }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
+        var buckets: [Int: (r: CGFloat, g: CGFloat, b: CGFloat, n: CGFloat)] = [:]
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let r = CGFloat(pixels[i]) / 255, g = CGFloat(pixels[i + 1]) / 255, b = CGFloat(pixels[i + 2]) / 255
+            let c = UIColor(red: r, green: g, blue: b, alpha: 1)
+            var h: CGFloat = 0, s: CGFloat = 0, v: CGFloat = 0
+            c.getHue(&h, saturation: &s, brightness: &v, alpha: nil)
+            guard s > 0.18, v > 0.18 else { continue }   // skip greys / near-black
+            let key = Int(h * 12)
+            let cur = buckets[key] ?? (0, 0, 0, 0)
+            buckets[key] = (cur.r + r, cur.g + g, cur.b + b, cur.n + 1)
+        }
+        return buckets.values.sorted { $0.n > $1.n }.prefix(count).map {
+            UIColor(red: $0.r / $0.n, green: $0.g / $0.n, blue: $0.b / $0.n, alpha: 1)
+        }
+    }
+}
 
-//No matter my multiple attempts to add fog.. but nothing worked so I just have the code still that it may or may not. Just dont want to break anything by taking it out. these are the discussions I used to get an idea from
-// https://developer.apple.com/documentation/scenekit/scnscene/fogenddistance
-// https://developer.apple.com/documentation/scenekit/scnscene/fogcolor
-// https://developer.apple.com/documentation/ARKit/creating-a-fog-effect-using-scene-depth
-// https://stackoverflow.com/questions/61737837/how-can-i-set-fog-in-scenekit-to-follow-a-curve
-
-// This was nice gave me a few more ideas for shadows:
-// https://www.youtube.com/watch?v=8z2OKhReD3k
-
-
-
+extension UIColor {
+    /// Push saturation/brightness up so blooms glow rather than look muddy.
+    func locoloVivid() -> UIColor {
+        var h: CGFloat = 0, s: CGFloat = 0, v: CGFloat = 0, a: CGFloat = 0
+        getHue(&h, saturation: &s, brightness: &v, alpha: &a)
+        return UIColor(hue: h, saturation: min(1, max(0.55, s * 1.2)), brightness: min(1, max(0.7, v * 1.15)), alpha: 1)
+    }
+}

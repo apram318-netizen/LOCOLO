@@ -14,7 +14,12 @@ import ARKit
 import CoreLocation
 
 struct ARDisplayView: View {
+    /// The asset the user came to see (detail sheet "View in AR"). Memories
+    /// captured in this session attach to it by default.
+    var focusAssetId: UUID? = nil
+
     @StateObject private var vm = ARDisplayViewModel()
+    @ObservedObject private var backgroundMode = BackgroundExploreService.shared
     @State private var hypeBurst: UUID?
 
     @State private var snapshot: SnapshotItem?
@@ -25,7 +30,7 @@ struct ARDisplayView: View {
 
     private struct SnapshotItem: Identifiable {
         let id = UUID()
-        let image: UIImage
+        let media: MemoryCaptureMedia
     }
 
     var body: some View {
@@ -80,7 +85,7 @@ struct ARDisplayView: View {
                                 Task { await recordClipToStory() }
                             }
                         )
-                        .accessibilityLabel("Take AR snapshot. Long-press to record a clip for Story.")
+                        .accessibilityLabel("Capture a memory. Long-press to record a clip.")
                         .padding(.trailing, 20)
                         .padding(.bottom, 116)
                     }
@@ -146,6 +151,41 @@ struct ARDisplayView: View {
                 .transition(.scale)
             }
 
+
+            // MARK: - Background AR toggle
+            // Keeps location + audio alive after you lock the phone, so asset
+            // sounds still play as you walk past (ARKit itself can't run in
+            // the background).
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        ARHaptics.tick()
+                        backgroundMode.toggle()
+                        clipToast = backgroundMode.isOn
+                            ? "Background AR on — sounds play as you pass assets, even locked"
+                            : "Background AR off"
+                        Task {
+                            try? await Task.sleep(nanoseconds: 2_500_000_000)
+                            clipToast = nil
+                        }
+                    } label: {
+                        Label(backgroundMode.isOn ? "BG on" : "BG", systemImage: backgroundMode.isOn ? "speaker.wave.2.fill" : "speaker.slash")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundColor(backgroundMode.isOn ? .white : .primary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(backgroundMode.isOn ? AnyShapeStyle(Color.purple) : AnyShapeStyle(.ultraThinMaterial),
+                                        in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 88)
+                    .padding(.trailing, 20)
+                    .accessibilityLabel(backgroundMode.isOn ? "Background AR on" : "Background AR off")
+                    .accessibilityHint("Keeps playing asset sounds as you walk with the phone locked")
+                }
+                Spacer()
+            }
 
             // MARK: - Speech Trigger Banner
             // Tells the viewer why the mic is on and what to say.
@@ -308,8 +348,12 @@ struct ARDisplayView: View {
         .onChange(of: vm.finderTarget?.asset.id) { _, _ in refreshLiveActivity() }
         .task { await vm.runFinderPulses() }
         .animation(.spring(response: 0.45, dampingFraction: 0.75), value: vm.justFound?.id)
+        // Every capture becomes a "memo": attach it to the asset you're
+        // with, share it to Reels, send it to friends, or just save it.
         .sheet(item: $snapshot) { item in
-            ARSnapshotPreview(image: item.image)
+            MemoryComposerView(media: item.media,
+                               candidates: memoryCandidates,
+                               preselected: focusAssetId ?? memoryCandidates.first?.id)
         }
     }
 
@@ -322,7 +366,7 @@ struct ARDisplayView: View {
             defer { isCapturing = false }
             withAnimation(.easeIn(duration: 0.35)) { flash = false }
             guard let raw = await vm.captureSnapshot() else { return }
-            snapshot = SnapshotItem(image: ARSnapshotRenderer.render(raw, caption: snapshotCaption))
+            snapshot = SnapshotItem(media: .photo(ARSnapshotRenderer.render(raw, caption: snapshotCaption)))
         }
     }
 
@@ -339,19 +383,30 @@ struct ARDisplayView: View {
             clipToast = "Couldn't record clip"
             return
         }
-        do {
-            _ = try await StoryStore.shared.postVideo(
-                mp4Data: data,
-                caption: snapshotCaption.map { "AR clip \($0)" },
-                assetId: vm.finderTarget?.asset.id ?? vm.justFound?.id)
-            LocoloAnalytics.storyPosted(video: true)
-            ARHaptics.success()
-            clipToast = "Clip posted to Story"
-        } catch {
-            clipToast = "Story unavailable"
-        }
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
         clipToast = nil
+        ARHaptics.success()
+        // Same composer as photos: memory / Reels / Story / friends.
+        snapshot = SnapshotItem(media: .video(data))
+    }
+
+    /// Assets close enough to plausibly be "in" the shot, nearest first; the
+    /// focused asset always qualifies.
+    private var memoryCandidates: [DigitalAsset] {
+        let origin = vm.userLocation
+        let ranked = vm.nearbyAssets
+            .map { asset -> (DigitalAsset, Double) in
+                guard let origin, let lat = asset.latitude, let lon = asset.longitude else { return (asset, .infinity) }
+                return (asset, origin.distance(from: CLLocation(latitude: lat, longitude: lon)))
+            }
+            .filter { $0.1 < 200 || $0.0.id == focusAssetId }
+            .sorted { $0.1 < $1.1 }
+            .map(\.0)
+        if let focusAssetId, let i = ranked.firstIndex(where: { $0.id == focusAssetId }), i > 0 {
+            var copy = ranked
+            copy.insert(copy.remove(at: i), at: 0)
+            return copy
+        }
+        return ranked
     }
 
     private func refreshLiveActivity() {

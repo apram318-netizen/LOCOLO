@@ -30,6 +30,7 @@ struct ARSettingsView: View {
     @State private var errorMessage: String?
 
     @ObservedObject private var wallets = WalletService.shared
+    @ObservedObject private var features = AppFeatures.shared
     @State private var walletAddressDraft = ""
     @State private var walletBanner: String?
 
@@ -38,7 +39,7 @@ struct ARSettingsView: View {
     var body: some View {
         List {
             accountSection
-            walletSection
+            if features.marketplaceEnabled { walletSection }
             notificationsSection
             safetySection
             privacySection
@@ -115,7 +116,7 @@ struct ARSettingsView: View {
     private var walletSection: some View {
         Section {
             if !wallets.available && wallets.hasLoaded {
-                Text("On-chain wallets unlock after Phase C SQL (§5.19).")
+                Text("Wallets aren't available yet.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else if let primary = wallets.primary {
@@ -151,9 +152,9 @@ struct ARSettingsView: View {
                 Text(walletBanner).font(.caption).foregroundColor(.secondary)
             }
         } header: {
-            Text("Wallet (Phase C)")
+            Text("Wallet")
         } footer: {
-            Text("Locolo stores your address only — never keys. Embedded passkey wallets (Coinbase Smart Wallet / Privy) plug in here after §5.19.")
+            Text("Locolo stores your address only — never your keys.")
         }
         .task { if !wallets.hasLoaded { await wallets.refresh() } }
     }

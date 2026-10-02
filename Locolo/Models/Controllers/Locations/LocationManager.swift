@@ -29,8 +29,16 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     // MARK: - Private variables
     private let manager = CLLocationManager()
     private var lastSent: Date = .distantPast
-    private let activeUploadInterval: TimeInterval = 5    // seconds when moving
-    private let idleUploadInterval: TimeInterval = 60     // seconds when idle
+    /// Upload cadence. These were 5 s / 60 s, which meant up to 12 network
+    /// round trips a minute while walking (each one writing Firestore twice and
+    /// running a nearby-places query). 60 s / 300 s keeps loop-residency maths
+    /// accurate while cutting ping volume by ~12x. (Visits + significant-change
+    /// monitoring still catch real movement between pings.)
+    private let activeUploadInterval: TimeInterval = 60    // seconds when moving
+    private let idleUploadInterval: TimeInterval = 300     // seconds when idle
+    /// Skip uploads when the user has barely moved, regardless of timer.
+    private let minUploadDistanceMeters: CLLocationDistance = 25
+    private var lastUploadedLocation: CLLocation?
 
     // MARK: - Init
     override private init() {
@@ -42,6 +50,20 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = true
         requestPermission()
+    }
+
+    /// Background AR mode: keep precise updates flowing with the screen off
+    /// (no auto-pause) and show the blue location pill so it's never hidden.
+    func setBackgroundExploring(_ on: Bool) {
+        manager.pausesLocationUpdatesAutomatically = !on
+        manager.showsBackgroundLocationIndicator = on
+        manager.distanceFilter = on ? 5 : 10
+        if on {
+            if manager.authorizationStatus == .authorizedWhenInUse {
+                manager.requestAlwaysAuthorization()
+            }
+            manager.startUpdatingLocation()
+        }
     }
 
     // MARK: - Permissions
@@ -113,53 +135,39 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
 
         let now = Date()
         let interval = isMoving ? activeUploadInterval : idleUploadInterval
-        
-        if now.timeIntervalSince(lastSent) >= interval {
-            lastSent = now
-            print(" Got location update:", loc.coordinate, "speed:", loc.speed)
-            LocationUploader.shared.uploadPing(loc)
-            LocationManager.shared.userLocation  = loc.coordinate
+        guard now.timeIntervalSince(lastSent) >= interval else { return }
+
+        // Distance gate: standing still (GPS jitter) shouldn't burn an upload.
+        if let last = lastUploadedLocation,
+           loc.distance(from: last) < minUploadDistanceMeters {
+            return
         }
+
+        lastSent = now
+        lastUploadedLocation = loc
+        LocationUploader.shared.uploadPing(loc)
     }
 
     
-    // MARK: - Simple Distance Utility (auto-uses fresh location or fallback)
-    // Using the exact location because I needed something a bit more accurate here.
+    // MARK: - Simple Distance Utility
+    /// Distance from the user's last known position to a coordinate.
+    ///
+    /// The previous implementation called `requestLocation()` and then
+    /// **blocked the calling thread on a semaphore for 300 ms** waiting for a
+    /// fix. Called from a SwiftUI body (e.g. per row in a list) that froze the
+    /// main thread. It is now a pure, non-blocking read of the cached location.
     func relativeDistance(to assetLat: Double, _ assetLon: Double) -> String {
-        let assetLoc = CLLocation(latitude: assetLat, longitude: assetLon)
-        
-        //  Try fresh immediate location (requestLocation)
-        var freshestCoord: CLLocationCoordinate2D?
-        let semaphore = DispatchSemaphore(value: 0)
-        
-        manager.requestLocation()
-        
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {   // small wait for fresh result
-            freshestCoord = self.userLocation
-            semaphore.signal()
-        }
-        
-        semaphore.wait()
-        
-        //  If still no fresh coordinate, fallback to stored ones
-        let coord = freshestCoord
-            ?? userLocation
-            ?? latestStoredLocation
-        
-        guard let coord else { return "--" }// HOpe I barely have to see this empty string
-        
-        let userLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-        let meters = userLoc.distance(from: assetLoc)
-        
-        //  Format readable distance
-        if meters < 100 {
+        guard let coord = userLocation ?? latestStoredLocation else { return "--" }
+
+        let meters = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            .distance(from: CLLocation(latitude: assetLat, longitude: assetLon))
+
+        if meters < 1000 {
             return "\(Int(meters)) m"
-        } else if meters < 1000 {
-            return String(format: "%.0f m", meters)
         } else if meters < 20000 {
             return String(format: "%.1f km", meters / 1000)
         } else {
-            return String(format: "%.1f miles", meters / 1609.34)
+            return String(format: "%.0f km", meters / 1000)
         }
     }
 

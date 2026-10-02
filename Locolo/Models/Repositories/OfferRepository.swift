@@ -56,6 +56,20 @@ final class OfferRepository {
     /// - Parameters: offerId is the offer to update, status is the new status.
     /// - Returns: Nothing.
     func updateOfferStatus(offerId: UUID, status: String) async throws {
+        // Accept / reject go through respond_to_offer (2026_v3_offers_fix.sql):
+        // owner-checked, atomic, closes competing offers and refreshes the
+        // asset's counters. Before that migration we fall back to a plain update.
+        if status == "accepted" || status == "rejected" {
+            struct Params: Encodable { let p_offer: UUID; let p_accept: Bool }
+            do {
+                try await client
+                    .rpc("respond_to_offer", params: Params(p_offer: offerId, p_accept: status == "accepted"))
+                    .execute()
+                return
+            } catch where EngagementStore.isMissingSchema(error) {
+                // fall through to the legacy path
+            }
+        }
         try await client
             .from("offers")
             .update(["status": status], returning: .minimal)

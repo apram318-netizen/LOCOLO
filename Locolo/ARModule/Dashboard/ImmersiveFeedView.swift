@@ -116,6 +116,7 @@ private struct ImmersiveFeedPage: View {
     @State private var isWishlisted = false
     @State private var burst = false
     @State private var showSaveToBoard = false
+    @State private var sharePayload: ARSharePayload?
     @State private var celebrateSave = false
 
     private var isHyped: Bool { engagement.isHyped(asset.id) }
@@ -252,11 +253,10 @@ private struct ImmersiveFeedPage: View {
                 .accessibilityLabel("Comments")
             }
 
-            ShareLink(item: DeepLinkRouter.assetURL(for: asset.id),
-                      subject: Text(asset.name ?? "AR creation"),
-                      message: Text("Check out \(asset.name ?? "this AR creation") on Locolo")) {
+            Button { sharePayload = .asset(asset) } label: {
                 railGlyph(icon: "paperplane", label: "Share")
             }
+            .sheet(item: $sharePayload) { ARShareSheet(payload: $0) }
             .accessibilityLabel("Share")
 
             railButton(icon: isWishlisted ? "bookmark.fill" : "bookmark",

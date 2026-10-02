@@ -130,7 +130,7 @@ struct ARGlassHeader<Trailing: View>: View {
                         .padding(9)
                         .background(Circle().fill(ARDesign.headerButtonCircle))
                 }
-                .accessibilityLabel("Exit AR World")
+                .accessibilityLabel("Exit Loco AR")
             }
 
             Spacer()

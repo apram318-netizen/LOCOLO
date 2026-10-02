@@ -45,12 +45,31 @@ struct ChatView: View {
                 keyChangedBanner
             }
 
+            if vm.isGroup && !vm.unreachableMembers.isEmpty {
+                Label("\(vm.unreachableMembers.count) member(s) haven't set up encrypted chat yet and won't receive messages.",
+                      systemImage: "person.crop.circle.badge.exclamationmark")
+                    .font(.caption)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 4)
+            }
+
             // MARK: Messages
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(visibleMessages) { msg in
-                            bubble(for: msg)
+                    LazyVStack(spacing: 4) {
+                        let list = visibleMessages
+                        ForEach(Array(list.enumerated()), id: \.element.id) { index, msg in
+                            let prev = index > 0 ? list[index - 1] : nil
+                            let next = index < list.count - 1 ? list[index + 1] : nil
+                            if prev == nil || !Calendar.current.isDate(prev!.time, inSameDayAs: msg.time) {
+                                daySeparator(msg.time)
+                            }
+                            bubble(for: msg,
+                                   firstInRun: prev?.senderId != msg.senderId || msg.time.timeIntervalSince(prev!.time) > 300,
+                                   lastInRun: next?.senderId != msg.senderId || next!.time.timeIntervalSince(msg.time) > 300)
                                 .id(msg.id)
                         }
                     }
@@ -121,25 +140,48 @@ struct ChatView: View {
 
     // MARK: - Bubbles
 
-    /// A shared asset is a message whose whole body is a locolo://asset/<id> link.
-    private func sharedAssetId(in msg: Message) -> UUID? {
+    /// A shared item is a message whose whole body is one locolo:// link.
+    private func sharedLink(in msg: Message) -> URL? {
         guard let body = msg.decryptedText?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let url = URL(string: body) else { return nil }
-        return DeepLinkRouter.assetId(from: url)
+              !body.contains(" "), let url = URL(string: body), url.scheme == "locolo" else { return nil }
+        return url
+    }
+
+    private func daySeparator(_ date: Date) -> some View {
+        Text(Calendar.current.isDateInToday(date) ? "Today"
+             : Calendar.current.isDateInYesterday(date) ? "Yesterday"
+             : date.formatted(date: .abbreviated, time: .omitted))
+            .font(.caption2.weight(.semibold))
+            .foregroundColor(.secondary)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
-    private func bubble(for msg: Message) -> some View {
+    private func bubble(for msg: Message, firstInRun: Bool, lastInRun: Bool) -> some View {
         let isMine = msg.senderId == currentUserId
-        HStack {
+        let sender = UUID(uuidString: msg.senderId).flatMap { CreatorCache.shared.creator($0) }
+        HStack(alignment: .bottom, spacing: 8) {
             if isMine { Spacer(minLength: 48) }
 
+            // Instagram shows the sender's avatar beside the last bubble of a run.
+            if !isMine && vm.isGroup {
+                if lastInRun {
+                    ARAvatarView(url: sender?.avatarUrl, name: sender?.displayName ?? msg.senderName, size: 28)
+                } else {
+                    Color.clear.frame(width: 28, height: 1)
+                }
+            }
+
             VStack(alignment: isMine ? .trailing : .leading, spacing: 3) {
-                if let assetId = sharedAssetId(in: msg) {
-                    // Instagram-style rich asset card instead of a raw link.
-                    AssetShareBubble(assetId: assetId, isMine: isMine) { asset in
-                        openedAsset = asset
-                    }
+                if vm.isGroup && !isMine && firstInRun {
+                    Text(sender?.displayName ?? msg.senderName)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                }
+                if let link = sharedLink(in: msg) {
+                    ChatLinkCard(url: link, isMine: isMine) { asset in openedAsset = asset }
                 } else {
                     Text(msg.displayText)
                         .font(.subheadline)
@@ -153,23 +195,31 @@ struct ChatView: View {
                                 Rectangle().fill(.ultraThinMaterial)
                             }
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .clipShape(BubbleShape(isMine: isMine, tail: lastInRun))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .strokeBorder(isMine ? Color.clear : ARDesign.hairline, lineWidth: 1)
+                            BubbleShape(isMine: isMine, tail: lastInRun)
+                                .stroke(isMine ? Color.clear : ARDesign.hairline, lineWidth: 1)
                         )
+                        .contextMenu {
+                            Button {
+                                UIPasteboard.general.string = msg.decryptedText
+                            } label: { Label("Copy", systemImage: "doc.on.doc") }
+                        }
                 }
 
-                Text(msg.time.formatted(date: .omitted, time: .shortened))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 4)
+                if lastInRun {
+                    Text(msg.time.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 4)
+                }
             }
 
             if !isMine { Spacer(minLength: 48) }
         }
+        .padding(.top, firstInRun ? 6 : 0)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(isMine ? "You" : msg.senderName): \(sharedAssetId(in: msg) != nil ? "shared an AR asset" : msg.displayText)")
+        .accessibilityLabel("\(isMine ? "You" : (sender?.displayName ?? msg.senderName)): \(sharedLink(in: msg) != nil ? "shared a link" : msg.displayText)")
     }
 
     // MARK: - Input
@@ -240,6 +290,108 @@ struct ChatView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 14)
         .padding(.bottom, 6)
+    }
+}
+
+// MARK: - Bubble shape
+
+/// Rounded bubble whose bottom corner on the sender's side tightens on the
+/// last message of a run (the iMessage / Instagram "tail" without a hook).
+private struct BubbleShape: Shape {
+    let isMine: Bool
+    let tail: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let r: CGFloat = 18, small: CGFloat = tail ? 6 : 18
+        return Path(roundedRect: rect, cornerRadii: RectangleCornerRadii(
+            topLeading: r,
+            bottomLeading: isMine ? r : small,
+            bottomTrailing: isMine ? small : r,
+            topTrailing: r))
+    }
+}
+
+// MARK: - Shared link cards
+
+/// Picks the right rich card for a shared locolo:// link.
+private struct ChatLinkCard: View {
+    let url: URL
+    let isMine: Bool
+    let onOpenAsset: (DigitalAsset) -> Void
+
+    var body: some View {
+        if let id = DeepLinkRouter.assetId(from: url) {
+            AssetShareBubble(assetId: id, isMine: isMine, onOpen: onOpenAsset)
+        } else if let id = DeepLinkRouter.userId(from: url) {
+            ProfileShareBubble(userId: id, isMine: isMine)
+        } else if case .memory(let id)? = DeepLinkRouter.route(from: url) {
+            MemoryShareBubble(memoryId: id, isMine: isMine)
+        } else if case .post(let id)? = DeepLinkRouter.route(from: url) {
+            Button { DeepLinkRouter.shared.handle(url) } label: {
+                LinkedEmbed(link: .post(id))
+                    .frame(width: 240)
+                    .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
+            }
+            .buttonStyle(.plain)
+        } else {
+            Text(url.absoluteString).font(.footnote).foregroundColor(.secondary)
+        }
+    }
+}
+
+private struct ProfileShareBubble: View {
+    let userId: UUID
+    let isMine: Bool
+    @ObservedObject private var creators = CreatorCache.shared
+
+    var body: some View {
+        let c = creators.creator(userId)
+        Button { DeepLinkRouter.shared.handle(DeepLinkRouter.userURL(for: userId)) } label: {
+            VStack(spacing: 8) {
+                ARAvatarView(url: c?.avatarUrl, name: c?.displayName ?? "?", size: 64)
+                ARCreatorName(creator: c, fallback: "Locolo explorer")
+                Text("@\(c?.username ?? "")").font(.caption).foregroundColor(.secondary)
+                Text("View profile")
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 14).padding(.vertical, 6)
+                    .background(Capsule().fill(Color.primary.opacity(0.08)))
+            }
+            .padding(14)
+            .frame(width: 200)
+            .background(RoundedRectangle(cornerRadius: 18).fill(.ultraThinMaterial))
+            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(ARDesign.hairline))
+        }
+        .buttonStyle(.plain)
+        .task { await CreatorCache.shared.load([userId]) }
+    }
+}
+
+private struct MemoryShareBubble: View {
+    let memoryId: UUID
+    let isMine: Bool
+    @State private var memory: AssetMemory?
+
+    var body: some View {
+        Button { DeepLinkRouter.shared.handle(DeepLinkRouter.memoryURL(for: memoryId)) } label: {
+            ZStack(alignment: .bottomLeading) {
+                AsyncImage(url: memory?.previewURL) { $0.resizable().scaledToFill() }
+                    placeholder: { Color.purple.opacity(0.25) }
+                    .frame(width: 180, height: 250)
+                    .clipped()
+                LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .center, endPoint: .bottom)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Memory", systemImage: memory?.isVideo == true ? "play.fill" : "camera.aperture")
+                        .font(.caption2.weight(.bold))
+                    Text(memory?.assetName ?? "AR memory").font(.caption.weight(.semibold)).lineLimit(1)
+                }
+                .foregroundColor(.white)
+                .padding(10)
+            }
+            .frame(width: 180, height: 250)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+        }
+        .buttonStyle(.plain)
+        .task { memory = await MemoryStore.shared.fetchOne(memoryId) }
     }
 }
 

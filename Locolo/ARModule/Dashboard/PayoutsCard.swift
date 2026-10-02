@@ -28,7 +28,7 @@ struct PayoutsCard: View {
             } else if rows.isEmpty {
                 Text(PaymentService.shared.available
                      ? "No payouts yet — earnings stay in your portfolio until you cash out."
-                     : "Payout history appears after §5.18 SQL is applied.")
+                     : "Payout history isn't available yet.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
